@@ -20,12 +20,23 @@ public class LoginResponse {
     @Schema(description = "계정 상태", example = "APPROVED")
     private final String status;
 
-    public LoginResponse(Long memberId, String studentNumber, String name, String role, String status) {
+    @Schema(description = "JWT access token")
+    private final String accessToken;
+    @Schema(description = "Token type", example = "Bearer")
+    private final String tokenType;
+    @Schema(description = "Expiration in seconds", example = "3600")
+    private final long expiresIn;
+
+    public LoginResponse(Long memberId, String studentNumber, String name, String role, String status,
+                         String accessToken, String tokenType, long expiresIn) {
         this.memberId = memberId;
         this.studentNumber = studentNumber;
         this.name = name;
         this.role = role;
         this.status = status;
+        this.accessToken = accessToken;
+        this.tokenType = tokenType;
+        this.expiresIn = expiresIn;
     }
 
     public Long getMemberId() {
@@ -47,4 +58,8 @@ public class LoginResponse {
     public String getStatus() {
         return status;
     }
+
+    public String getAccessToken() { return accessToken; }
+    public String getTokenType() { return tokenType; }
+    public long getExpiresIn() { return expiresIn; }
 }

@@ -4,6 +4,7 @@ import com.sat.lms.auth.dto.LoginRequest;
 import com.sat.lms.auth.dto.SignupRequest;
 import com.sat.lms.auth.dto.SignupResponse;
 import com.sat.lms.global.exception.BusinessException;
+import com.sat.lms.global.security.JwtTokenProvider;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.entity.MemberStatus;
@@ -33,13 +34,17 @@ class AuthServiceTest {
 
     private MemberRepository memberRepository;
     private PasswordEncoder passwordEncoder;
+    private JwtTokenProvider jwtTokenProvider;
     private AuthService authService;
 
     @BeforeEach
     void setUp() {
         memberRepository = mock(MemberRepository.class);
         passwordEncoder = new BCryptPasswordEncoder(4);
-        authService = new AuthService(memberRepository, passwordEncoder);
+        jwtTokenProvider = mock(JwtTokenProvider.class);
+        when(jwtTokenProvider.createAccessToken(any(), any())).thenReturn("access-token");
+        when(jwtTokenProvider.getExpirationSeconds()).thenReturn(3600L);
+        authService = new AuthService(memberRepository, passwordEncoder, jwtTokenProvider);
     }
 
     @Test
@@ -92,6 +97,7 @@ class AuthServiceTest {
 
         assertThat(authService.login(new LoginRequest("20231234", "password1")).getStatus())
                 .isEqualTo("APPROVED");
+        assertThat(authService.login(new LoginRequest("20231234", "password1")).getAccessToken()).isNotBlank();
     }
 
     @ParameterizedTest
