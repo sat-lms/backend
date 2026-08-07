@@ -45,6 +45,18 @@ public class Member {
     protected Member() {
     }
 
+    public static Member createStudent(String studentNumber, String name, String passwordHash, OffsetDateTime now) {
+        Member member = new Member();
+        member.studentNumber = studentNumber;
+        member.name = name;
+        member.passwordHash = passwordHash;
+        member.role = MemberRole.STUDENT;
+        member.status = MemberStatus.PENDING;
+        member.createdAt = now;
+        member.updatedAt = now;
+        return member;
+    }
+
     public void applyReviewResult(MemberStatus status, OffsetDateTime reviewedAt) {
         this.status = status;
         this.updatedAt = reviewedAt;
