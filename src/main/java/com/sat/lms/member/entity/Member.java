@@ -45,6 +45,11 @@ public class Member {
     protected Member() {
     }
 
+    public void applyReviewResult(MemberStatus status, OffsetDateTime reviewedAt) {
+        this.status = status;
+        this.updatedAt = reviewedAt;
+    }
+
     public Long getId() {
         return id;
     }
