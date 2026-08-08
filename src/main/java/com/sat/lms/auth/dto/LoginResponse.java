@@ -5,11 +5,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(description = "로그인 응답")
 public class LoginResponse {
 
-    @Schema(description = "Access Token", example = "jwt-token-value")
-    private final String accessToken;
-
-    @Schema(description = "사용자 ID", example = "1")
-    private final Long userId;
+    @Schema(description = "회원 ID", example = "1")
+    private final Long memberId;
 
     @Schema(description = "학번", example = "20231234")
     private final String studentNumber;
@@ -20,20 +17,30 @@ public class LoginResponse {
     @Schema(description = "역할", example = "STUDENT")
     private final String role;
 
-    public LoginResponse(String accessToken, Long userId, String studentNumber, String name, String role) {
-        this.accessToken = accessToken;
-        this.userId = userId;
+    @Schema(description = "계정 상태", example = "APPROVED")
+    private final String status;
+
+    @Schema(description = "JWT access token")
+    private final String accessToken;
+    @Schema(description = "Token type", example = "Bearer")
+    private final String tokenType;
+    @Schema(description = "Expiration in seconds", example = "3600")
+    private final long expiresIn;
+
+    public LoginResponse(Long memberId, String studentNumber, String name, String role, String status,
+                         String accessToken, String tokenType, long expiresIn) {
+        this.memberId = memberId;
         this.studentNumber = studentNumber;
         this.name = name;
         this.role = role;
+        this.status = status;
+        this.accessToken = accessToken;
+        this.tokenType = tokenType;
+        this.expiresIn = expiresIn;
     }
 
-    public String getAccessToken() {
-        return accessToken;
-    }
-
-    public Long getUserId() {
-        return userId;
+    public Long getMemberId() {
+        return memberId;
     }
 
     public String getStudentNumber() {
@@ -47,4 +54,12 @@ public class LoginResponse {
     public String getRole() {
         return role;
     }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public String getAccessToken() { return accessToken; }
+    public String getTokenType() { return tokenType; }
+    public long getExpiresIn() { return expiresIn; }
 }
