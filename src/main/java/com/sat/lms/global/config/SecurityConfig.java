@@ -21,7 +21,9 @@ public class SecurityConfig {
                                             ObjectMapper objectMapper) throws Exception {
         return http.csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.requestMatchers("/api/v1/members/me").authenticated()
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/v1/admin/member-applications/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/members/me").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint((request, response, exception) -> {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
