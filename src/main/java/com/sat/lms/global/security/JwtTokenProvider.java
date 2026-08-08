@@ -2,6 +2,7 @@ package com.sat.lms.global.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -13,25 +14,98 @@ import java.util.Date;
 
 @Component
 public class JwtTokenProvider {
+
     private final SecretKey key;
     private final long expirationSeconds;
 
-    public JwtTokenProvider(@Value("${jwt.secret:${JWT_SECRET:local-development-secret-key-must-be-at-least-32-bytes}}") String secret,
-                            @Value("${jwt.expiration-seconds:3600}") long expirationSeconds) {
-        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+    public JwtTokenProvider(
+            @Value("${jwt.secret}") String secret,
+            @Value("${jwt.expiration-seconds:3600}") long expirationSeconds
+    ) {
+        this.key = Keys.hmacShaKeyFor(
+                secret.getBytes(StandardCharsets.UTF_8)
+        );
         this.expirationSeconds = expirationSeconds;
     }
 
+    /**
+     * Access Token 생성
+     */
     public String createAccessToken(Long memberId, String role) {
+
         Instant now = Instant.now();
-        return Jwts.builder().subject(memberId.toString()).claim("memberId", memberId).claim("role", role)
-                .issuedAt(Date.from(now)).expiration(Date.from(now.plusSeconds(expirationSeconds)))
-                .signWith(key).compact();
+
+        return Jwts.builder()
+                .subject(memberId.toString())
+                .claim("memberId", memberId)
+                .claim("role", role)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(
+                        now.plusSeconds(expirationSeconds)
+                ))
+                .signWith(key)
+                .compact();
     }
 
-    public Claims parse(String token) {
-        return Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
+    /**
+     * JWT 유효성 검사
+     */
+    public boolean validateToken(String token) {
+
+        try {
+
+            Jwts.parser()
+                    .verifyWith(key)
+                    .build()
+                    .parseSignedClaims(token);
+
+            return true;
+
+        } catch (JwtException | IllegalArgumentException e) {
+
+            return false;
+        }
     }
 
-    public long getExpirationSeconds() { return expirationSeconds; }
+    /**
+     * JWT에서 memberId 추출
+     */
+    public Long getMemberId(String token) {
+
+        Claims claims = getClaims(token);
+
+        return claims.get(
+                "memberId",
+                Long.class
+        );
+    }
+
+    /**
+     * JWT에서 role 추출
+     */
+    public String getRole(String token) {
+
+        Claims claims = getClaims(token);
+
+        return claims.get(
+                "role",
+                String.class
+        );
+    }
+
+    /**
+     * JWT Claims 조회
+     */
+    private Claims getClaims(String token) {
+
+        return Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+    }
+
+    public long getExpirationSeconds() {
+        return expirationSeconds;
+    }
 }
