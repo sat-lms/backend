@@ -4,7 +4,6 @@ import com.sat.lms.global.config.SecurityConfig;
 import com.sat.lms.global.security.JwtAuthenticationFilter;
 import com.sat.lms.global.security.JwtTokenProvider;
 import com.sat.lms.member.service.MemberService;
-import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -12,7 +11,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -28,10 +26,9 @@ class MemberControllerSecurityTest {
 
     @Test
     void validJwtUsesMemberIdFromToken() throws Exception {
-        Claims claims = mock(Claims.class);
-        when(claims.getSubject()).thenReturn("2");
-        when(claims.get("role", String.class)).thenReturn("STUDENT");
-        when(tokenProvider.parse("valid-token")).thenReturn(claims);
+        when(tokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(tokenProvider.getMemberId("valid-token")).thenReturn(2L);
+        when(tokenProvider.getRole("valid-token")).thenReturn("STUDENT");
 
         mockMvc.perform(get("/api/v1/members/me").header("Authorization", "Bearer valid-token"))
                 .andExpect(status().isOk());
@@ -48,8 +45,6 @@ class MemberControllerSecurityTest {
 
     @Test
     void invalidTokenReturnsUnauthorized() throws Exception {
-        when(tokenProvider.parse("invalid-token")).thenThrow(new IllegalArgumentException("invalid"));
-
         mockMvc.perform(get("/api/v1/members/me").header("Authorization", "Bearer invalid-token"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
