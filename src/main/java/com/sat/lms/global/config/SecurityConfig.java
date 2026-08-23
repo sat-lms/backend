@@ -30,6 +30,11 @@ public class SecurityConfig {
                     response.setContentType(MediaType.APPLICATION_JSON_VALUE);
                     response.setCharacterEncoding(StandardCharsets.UTF_8.name());
                     objectMapper.writeValue(response.getWriter(), ApiResponse.fail("인증이 필요합니다."));
+                }).accessDeniedHandler((request, response, exception) -> {
+                    response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                    response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+                    objectMapper.writeValue(response.getWriter(), ApiResponse.fail("접근 권한이 없습니다."));
                 }))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class).build();
     }
