@@ -84,6 +84,16 @@ class NoticeControllerSecurityTest {
         }
     }
 
+    @Test
+    void createAcceptsOneHundredCharacterTitle() throws Exception {
+        authenticate("admin", 7L, "ADMIN");
+        mockMvc.perform(post("/api/v1/notices")
+                        .header("Authorization", "Bearer admin")
+                        .contentType("application/json")
+                        .content("{\"title\":\"" + "a".repeat(100) + "\",\"content\":\"내용\"}"))
+                .andExpect(status().isCreated());
+    }
+
     private void authenticate(String token, Long memberId, String role) {
         when(tokenProvider.validateToken(token)).thenReturn(true);
         when(tokenProvider.getMemberId(token)).thenReturn(memberId);

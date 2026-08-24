@@ -21,6 +21,8 @@ import java.time.OffsetDateTime;
         @Index(name = "idx_notice_pinned_created_at", columnList = "is_pinned, created_at")
 })
 public class Notice {
+    public static final int TITLE_MAX_LENGTH = 100;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

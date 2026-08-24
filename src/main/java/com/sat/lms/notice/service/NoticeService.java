@@ -20,6 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 
+import static com.sat.lms.notice.entity.Notice.TITLE_MAX_LENGTH;
+
 @Service
 @Transactional(readOnly = true)
 public class NoticeService {
@@ -68,7 +70,8 @@ public class NoticeService {
         String content = request.isContentPresent() ? request.getContent().trim() : null;
         Boolean pinned = request.isPinnedPresent() ? request.getIsPinned() : null;
         notice.update(title, content, pinned, OffsetDateTime.now());
-        return NoticeDetailResponse.from(notice, false);
+        boolean isRead = noticeReadRepository.existsByNoticeIdAndMemberId(noticeId, memberId);
+        return NoticeDetailResponse.from(notice, isRead);
     }
 
     @Transactional
@@ -82,7 +85,7 @@ public class NoticeService {
     private void validateUpdate(NoticeUpdateRequest request) {
         if (request.isEmpty()) throw new BusinessException(HttpStatus.BAD_REQUEST, "수정할 필드를 입력해주세요.");
         if (request.isTitlePresent() && (request.getTitle() == null || request.getTitle().isBlank()
-                || request.getTitle().length() > 100)) {
+                || request.getTitle().length() > TITLE_MAX_LENGTH)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "제목은 공백이 아닌 1~100자여야 합니다.");
         }
         if (request.isContentPresent() && (request.getContent() == null || request.getContent().isBlank())) {

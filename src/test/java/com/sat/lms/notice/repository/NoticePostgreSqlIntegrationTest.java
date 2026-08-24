@@ -113,6 +113,8 @@ class NoticePostgreSqlIntegrationTest {
         assertThat(foundRead.getMember().getId()).isEqualTo(studentId);
         assertThat(foundNotice.getCreatedAt().toInstant()).isEqualTo(createdAt.toInstant());
         assertThat(foundRead.getReadAt().toInstant()).isEqualTo(createdAt.plusMinutes(5).toInstant());
+        assertThat(noticeReadRepository.existsByNoticeIdAndMemberId(notice.getId(), studentId)).isTrue();
+        assertThat(noticeReadRepository.existsByNoticeIdAndMemberId(notice.getId(), adminId)).isFalse();
     }
 
     @Test

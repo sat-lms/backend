@@ -110,6 +110,57 @@ class NoticeServiceTest {
     }
 
     @Test
+    void updateResponseIsReadWhenAdminAlreadyReadNotice() {
+        Member admin = admin();
+        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false, OffsetDateTime.now());
+        NoticeUpdateRequest request = new NoticeUpdateRequest();
+        request.setTitle("새 제목");
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
+        when(noticeReadRepository.existsByNoticeIdAndMemberId(1L, 7L)).thenReturn(true);
+
+        var response = service.update(1L, request, 7L);
+
+        assertThat(response.getIsRead()).isTrue();
+        verify(noticeReadRepository).existsByNoticeIdAndMemberId(1L, 7L);
+    }
+
+    @Test
+    void updateResponseIsUnreadWhenAdminHasNotReadNotice() {
+        Member admin = admin();
+        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false, OffsetDateTime.now());
+        NoticeUpdateRequest request = new NoticeUpdateRequest();
+        request.setTitle("새 제목");
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
+        when(noticeReadRepository.existsByNoticeIdAndMemberId(1L, 7L)).thenReturn(false);
+
+        var response = service.update(1L, request, 7L);
+
+        assertThat(response.getIsRead()).isFalse();
+        verify(noticeReadRepository).existsByNoticeIdAndMemberId(1L, 7L);
+    }
+
+    @Test
+    void updateAcceptsOneHundredCharacterTitleAndRejectsOneHundredOne() {
+        Member admin = admin();
+        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false, OffsetDateTime.now());
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
+        NoticeUpdateRequest valid = new NoticeUpdateRequest();
+        valid.setTitle("a".repeat(100));
+
+        service.update(1L, valid, 7L);
+        assertThat(notice.getTitle()).hasSize(100);
+
+        NoticeUpdateRequest invalid = new NoticeUpdateRequest();
+        invalid.setTitle("a".repeat(101));
+        assertThatThrownBy(() -> service.update(1L, invalid, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    @Test
     void emptyPatchReturnsBadRequest() {
         Member admin = admin();
         when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));

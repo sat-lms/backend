@@ -9,6 +9,8 @@ import org.springframework.data.repository.query.Param;
 import java.time.OffsetDateTime;
 
 public interface NoticeReadRepository extends JpaRepository<NoticeRead, Long> {
+    boolean existsByNoticeIdAndMemberId(Long noticeId, Long memberId);
+
     @Modifying
     @Query(value = """
             INSERT INTO notice_read (notice_id, member_id, read_at)
