@@ -1,5 +1,7 @@
 package com.sat.lms.member.entity;
 
+import com.sat.lms.global.entity.BaseEntity;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -9,11 +11,9 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-import java.time.OffsetDateTime;
-
 @Entity
 @Table(name = "member")
-public class Member {
+public class Member extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -36,30 +36,21 @@ public class Member {
     @Column(name = "status", nullable = false, length = 20)
     private MemberStatus status;
 
-    @Column(name = "created_at", nullable = false)
-    private OffsetDateTime createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    private OffsetDateTime updatedAt;
-
     protected Member() {
     }
 
-    public static Member createStudent(String studentNumber, String name, String passwordHash, OffsetDateTime now) {
+    public static Member createStudent(String studentNumber, String name, String passwordHash) {
         Member member = new Member();
         member.studentNumber = studentNumber;
         member.name = name;
         member.passwordHash = passwordHash;
         member.role = MemberRole.STUDENT;
         member.status = MemberStatus.PENDING;
-        member.createdAt = now;
-        member.updatedAt = now;
         return member;
     }
 
-    public void applyReviewResult(MemberStatus status, OffsetDateTime reviewedAt) {
+    public void applyReviewResult(MemberStatus status) {
         this.status = status;
-        this.updatedAt = reviewedAt;
     }
 
     public Long getId() {
@@ -86,11 +77,4 @@ public class Member {
         return status;
     }
 
-    public OffsetDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public OffsetDateTime getUpdatedAt() {
-        return updatedAt;
-    }
 }

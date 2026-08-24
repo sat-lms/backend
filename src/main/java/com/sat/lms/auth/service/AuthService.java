@@ -14,8 +14,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.OffsetDateTime;
-
 @Service
 @Transactional(readOnly = true)
 public class AuthService {
@@ -39,12 +37,10 @@ public class AuthService {
             throw new BusinessException(HttpStatus.CONFLICT, "이미 사용 중인 학번입니다.");
         }
 
-        OffsetDateTime now = OffsetDateTime.now();
         Member member = Member.createStudent(
                 request.getStudentNumber(),
                 request.getName().trim(),
-                passwordEncoder.encode(request.getPassword()),
-                now
+                passwordEncoder.encode(request.getPassword())
         );
         Member saved = memberRepository.save(member);
         return new SignupResponse(saved.getId(), saved.getStudentNumber(), saved.getName(), saved.getStatus().name(), saved.getCreatedAt());

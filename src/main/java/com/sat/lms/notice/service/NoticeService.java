@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import static com.sat.lms.notice.entity.Notice.TITLE_MAX_LENGTH;
 
@@ -48,16 +49,15 @@ public class NoticeService {
     public NoticeDetailResponse getNotice(Long noticeId, Long memberId) {
         Notice notice = getNoticeWithAdmin(noticeId);
         requireMember(memberId);
-        noticeReadRepository.insertIfAbsent(noticeId, memberId, OffsetDateTime.now());
+        noticeReadRepository.insertIfAbsent(noticeId, memberId, OffsetDateTime.now(ZoneOffset.UTC));
         return NoticeDetailResponse.from(notice, true);
     }
 
     @Transactional
     public NoticeDetailResponse create(NoticeCreateRequest request, Long memberId) {
         Member admin = requireAdmin(memberId);
-        OffsetDateTime now = OffsetDateTime.now();
         Notice notice = Notice.create(admin, request.getTitle().trim(), request.getContent().trim(),
-                Boolean.TRUE.equals(request.getIsPinned()), now);
+                Boolean.TRUE.equals(request.getIsPinned()));
         return NoticeDetailResponse.from(noticeRepository.save(notice), false);
     }
 
@@ -69,7 +69,8 @@ public class NoticeService {
         String title = request.isTitlePresent() ? request.getTitle().trim() : null;
         String content = request.isContentPresent() ? request.getContent().trim() : null;
         Boolean pinned = request.isPinnedPresent() ? request.getIsPinned() : null;
-        notice.update(title, content, pinned, OffsetDateTime.now());
+        notice.update(title, content, pinned);
+        noticeRepository.flush();
         boolean isRead = noticeReadRepository.existsByNoticeIdAndMemberId(noticeId, memberId);
         return NoticeDetailResponse.from(notice, isRead);
     }

@@ -17,7 +17,7 @@ class MemberServiceTest {
     @Test
     void getMeDoesNotExposePasswordHash() {
         MemberRepository repository = mock(MemberRepository.class);
-        Member member = Member.createStudent("20231234", "홍길동", "secret-hash", OffsetDateTime.now());
+        Member member = Member.createStudent("20231234", "홍길동", "secret-hash");
         when(repository.findById(1L)).thenReturn(Optional.of(member));
 
         MemberMeResponse response = new MemberService(repository).getMe(1L);

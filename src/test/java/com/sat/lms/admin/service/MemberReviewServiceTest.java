@@ -24,7 +24,7 @@ class MemberReviewServiceTest {
         MemberRepository memberRepository = mock(MemberRepository.class);
         MemberReviewRepository memberReviewRepository = mock(MemberReviewRepository.class);
         MemberReviewService service = new MemberReviewService(memberRepository, memberReviewRepository);
-        Member pendingMember = Member.createStudent("2026000001", "학생", "hash", OffsetDateTime.now());
+        Member pendingMember = Member.createStudent("2026000001", "학생", "hash");
         MemberReviewRequest request = mock(MemberReviewRequest.class);
         when(request.getAction()).thenReturn(MemberReviewAction.APPROVED);
         when(memberRepository.findById(10L)).thenReturn(Optional.of(pendingMember));

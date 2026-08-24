@@ -19,8 +19,10 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,7 +52,13 @@ class AuthServiceTest {
     @Test
     void signupSucceedsWithStudentPendingAndEncodedPassword() {
         SignupRequest request = new SignupRequest("20231234", " 홍길동 ", "password1", "password1");
-        when(memberRepository.save(any(Member.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(memberRepository.save(any(Member.class))).thenAnswer(invocation -> {
+            Member member = invocation.getArgument(0);
+            OffsetDateTime auditedAt = OffsetDateTime.now(ZoneOffset.UTC);
+            ReflectionTestUtils.setField(member, "createdAt", auditedAt);
+            ReflectionTestUtils.setField(member, "updatedAt", auditedAt);
+            return member;
+        });
 
         SignupResponse response = authService.signup(request);
 
@@ -122,10 +130,9 @@ class AuthServiceTest {
     }
 
     private Member member(MemberStatus status) {
-        OffsetDateTime now = OffsetDateTime.now();
-        Member member = Member.createStudent("20231234", "홍길동", passwordEncoder.encode("password1"), now);
+        Member member = Member.createStudent("20231234", "홍길동", passwordEncoder.encode("password1"));
         if (status != MemberStatus.PENDING) {
-            member.applyReviewResult(status, now);
+            member.applyReviewResult(status);
         }
         return member;
     }

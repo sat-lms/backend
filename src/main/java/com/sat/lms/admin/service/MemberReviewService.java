@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Service
 @Transactional
@@ -37,14 +38,14 @@ public class MemberReviewService {
             throw new BusinessException(HttpStatus.CONFLICT, "이미 처리된 가입 신청입니다.");
         }
 
-        OffsetDateTime now = OffsetDateTime.now(); // 서버 시간에 따라 변동
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         boolean approved = request.getAction() == MemberReviewAction.APPROVED;
         String rejectionReason = approved ? null : request.getRejectionReason();
 
         MemberReview review = new MemberReview(memberId, reviewerId, request.getAction(), rejectionReason, now);
         memberReviewRepository.save(review);
 
-        member.applyReviewResult(approved ? MemberStatus.APPROVED : MemberStatus.REJECTED, now);
+        member.applyReviewResult(approved ? MemberStatus.APPROVED : MemberStatus.REJECTED);
 
         return MemberReviewResponse.of(member, review);
     }
