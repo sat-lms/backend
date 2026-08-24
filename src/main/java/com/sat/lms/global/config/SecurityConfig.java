@@ -27,6 +27,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/notices/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/notices/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/notices/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assignments/*/submission").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assignments/*/submission").authenticated()
                         .requestMatchers("/api/v1/admin/member-applications/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/members/me").authenticated()
                         .anyRequest().permitAll())
