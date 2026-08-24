@@ -5,3 +5,9 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+
+aws:
+  region: ${AWS_REGION:ap-northeast-2}
+  s3:
+    bucket: ${AWS_S3_BUCKET:}
+    presigned-expiration-minutes: ${AWS_S3_PRESIGNED_EXPIRATION_MINUTES:5}
