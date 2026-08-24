@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.sat.lms.admin.service.MemberReviewService;
@@ -32,6 +33,7 @@ class LmsApplicationTests {
 	@MockitoBean MemberReviewRepository memberReviewRepository;
 	@MockitoBean NoticeRepository noticeRepository;
 	@MockitoBean NoticeReadRepository noticeReadRepository;
+	@MockitoBean JpaMetamodelMappingContext jpaMetamodelMappingContext;
 
 	@Test
 	void contextLoads() {

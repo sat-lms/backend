@@ -96,7 +96,7 @@ class NoticeServiceTest {
     @Test
     void partialUpdateChangesOnlyProvidedField() {
         Member admin = admin();
-        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false, OffsetDateTime.now().minusDays(1));
+        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false);
         NoticeUpdateRequest request = new NoticeUpdateRequest();
         request.setTitle("새 제목");
         when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
@@ -112,7 +112,7 @@ class NoticeServiceTest {
     @Test
     void updateResponseIsReadWhenAdminAlreadyReadNotice() {
         Member admin = admin();
-        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false, OffsetDateTime.now());
+        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false);
         NoticeUpdateRequest request = new NoticeUpdateRequest();
         request.setTitle("새 제목");
         when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
@@ -128,7 +128,7 @@ class NoticeServiceTest {
     @Test
     void updateResponseIsUnreadWhenAdminHasNotReadNotice() {
         Member admin = admin();
-        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false, OffsetDateTime.now());
+        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false);
         NoticeUpdateRequest request = new NoticeUpdateRequest();
         request.setTitle("새 제목");
         when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
@@ -144,7 +144,7 @@ class NoticeServiceTest {
     @Test
     void updateAcceptsOneHundredCharacterTitleAndRejectsOneHundredOne() {
         Member admin = admin();
-        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false, OffsetDateTime.now());
+        Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false);
         when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
         when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
         NoticeUpdateRequest valid = new NoticeUpdateRequest();
@@ -199,7 +199,7 @@ class NoticeServiceTest {
     }
 
     private Notice notice() {
-        return Notice.create(admin(), "제목", "내용", false, OffsetDateTime.now());
+        return Notice.create(admin(), "제목", "내용", false);
     }
 
     private Member admin() {
