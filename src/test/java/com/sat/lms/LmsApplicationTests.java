@@ -15,6 +15,10 @@ import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.member.repository.MemberReviewRepository;
 import com.sat.lms.notice.repository.NoticeReadRepository;
 import com.sat.lms.notice.repository.NoticeRepository;
+import com.sat.lms.global.config.AwsProperties;
+import com.sat.lms.global.storage.FileStorage;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,6 +38,10 @@ class LmsApplicationTests {
 	@MockitoBean NoticeRepository noticeRepository;
 	@MockitoBean NoticeReadRepository noticeReadRepository;
 	@MockitoBean JpaMetamodelMappingContext jpaMetamodelMappingContext;
+	@Autowired S3Client s3Client;
+	@Autowired S3Presigner s3Presigner;
+	@Autowired AwsProperties awsProperties;
+	@Autowired FileStorage fileStorage;
 
 	@Test
 	void contextLoads() {
@@ -41,6 +49,10 @@ class LmsApplicationTests {
 		assertThat(applicationContext.getBean(MemberReviewService.class)).isNotNull();
 		assertThat(applicationContext.getBean(GlobalExceptionHandler.class)).isNotNull();
 		assertThat(applicationContext.getBean(SecurityFilterChain.class)).isNotNull();
+		assertThat(s3Client).isNotNull();
+		assertThat(s3Presigner).isNotNull();
+		assertThat(awsProperties.getRegion()).isEqualTo("ap-northeast-2");
+		assertThat(fileStorage).isNotNull();
 	}
 
 }

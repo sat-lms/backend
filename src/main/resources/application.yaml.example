@@ -28,3 +28,9 @@ jwt:
   # 운영 환경에서는 반드시 충분히 긴 임의 문자열을 JWT_SECRET으로 주입하세요.
   secret: ${JWT_SECRET:local-development-secret-key-must-be-at-least-32-bytes}
   expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
+
+aws:
+  region: ${AWS_REGION:ap-northeast-2}
+  s3:
+    bucket: ${AWS_S3_BUCKET:}
+    presigned-expiration-minutes: ${AWS_S3_PRESIGNED_EXPIRATION_MINUTES:5}
