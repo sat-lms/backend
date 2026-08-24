@@ -1,0 +1,119 @@
+package com.sat.lms.notice.service;
+
+import com.sat.lms.global.exception.BusinessException;
+import com.sat.lms.notice.dto.NoticeCreateRequest;
+import com.sat.lms.notice.dto.NoticeDetailResponse;
+import com.sat.lms.notice.dto.NoticeListResponse;
+import com.sat.lms.notice.dto.NoticeUpdateRequest;
+import com.sat.lms.notice.dto.UnreadCountResponse;
+import com.sat.lms.notice.entity.Notice;
+import com.sat.lms.notice.repository.NoticeReadRepository;
+import com.sat.lms.notice.repository.NoticeRepository;
+import com.sat.lms.member.entity.Member;
+import com.sat.lms.member.entity.MemberRole;
+import com.sat.lms.member.repository.MemberRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.OffsetDateTime;
+
+import static com.sat.lms.notice.entity.Notice.TITLE_MAX_LENGTH;
+
+@Service
+@Transactional(readOnly = true)
+public class NoticeService {
+    private final NoticeRepository noticeRepository;
+    private final NoticeReadRepository noticeReadRepository;
+    private final MemberRepository memberRepository;
+
+    public NoticeService(NoticeRepository noticeRepository, NoticeReadRepository noticeReadRepository,
+                         MemberRepository memberRepository) {
+        this.noticeRepository = noticeRepository;
+        this.noticeReadRepository = noticeReadRepository;
+        this.memberRepository = memberRepository;
+    }
+
+    public Page<NoticeListResponse> getNotices(Long memberId, boolean unreadOnly, Pageable pageable) {
+        return noticeRepository.findNoticePage(memberId, unreadOnly, pageable);
+    }
+
+    public UnreadCountResponse getUnreadCount(Long memberId) {
+        return new UnreadCountResponse(noticeRepository.countUnreadByMemberId(memberId));
+    }
+
+    @Transactional
+    public NoticeDetailResponse getNotice(Long noticeId, Long memberId) {
+        Notice notice = getNoticeWithAdmin(noticeId);
+        requireMember(memberId);
+        noticeReadRepository.insertIfAbsent(noticeId, memberId, OffsetDateTime.now());
+        return NoticeDetailResponse.from(notice, true);
+    }
+
+    @Transactional
+    public NoticeDetailResponse create(NoticeCreateRequest request, Long memberId) {
+        Member admin = requireAdmin(memberId);
+        OffsetDateTime now = OffsetDateTime.now();
+        Notice notice = Notice.create(admin, request.getTitle().trim(), request.getContent().trim(),
+                Boolean.TRUE.equals(request.getIsPinned()), now);
+        return NoticeDetailResponse.from(noticeRepository.save(notice), false);
+    }
+
+    @Transactional
+    public NoticeDetailResponse update(Long noticeId, NoticeUpdateRequest request, Long memberId) {
+        requireAdmin(memberId);
+        validateUpdate(request);
+        Notice notice = getNoticeWithAdmin(noticeId);
+        String title = request.isTitlePresent() ? request.getTitle().trim() : null;
+        String content = request.isContentPresent() ? request.getContent().trim() : null;
+        Boolean pinned = request.isPinnedPresent() ? request.getIsPinned() : null;
+        notice.update(title, content, pinned, OffsetDateTime.now());
+        boolean isRead = noticeReadRepository.existsByNoticeIdAndMemberId(noticeId, memberId);
+        return NoticeDetailResponse.from(notice, isRead);
+    }
+
+    @Transactional
+    public void delete(Long noticeId, Long memberId) {
+        requireAdmin(memberId);
+        Notice notice = noticeRepository.findById(noticeId)
+                .orElseThrow(this::noticeNotFound);
+        noticeRepository.delete(notice);
+    }
+
+    private void validateUpdate(NoticeUpdateRequest request) {
+        if (request.isEmpty()) throw new BusinessException(HttpStatus.BAD_REQUEST, "수정할 필드를 입력해주세요.");
+        if (request.isTitlePresent() && (request.getTitle() == null || request.getTitle().isBlank()
+                || request.getTitle().length() > TITLE_MAX_LENGTH)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "제목은 공백이 아닌 1~100자여야 합니다.");
+        }
+        if (request.isContentPresent() && (request.getContent() == null || request.getContent().isBlank())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "내용은 공백일 수 없습니다.");
+        }
+        if (request.isPinnedPresent() && request.getIsPinned() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "고정 여부는 null일 수 없습니다.");
+        }
+    }
+
+    private Notice getNoticeWithAdmin(Long noticeId) {
+        return noticeRepository.findWithAdminById(noticeId).orElseThrow(this::noticeNotFound);
+    }
+
+    private Member requireMember(Long memberId) {
+        return memberRepository.findById(memberId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
+    }
+
+    private Member requireAdmin(Long memberId) {
+        Member member = requireMember(memberId);
+        if (member.getRole() != MemberRole.ADMIN) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다.");
+        }
+        return member;
+    }
+
+    private BusinessException noticeNotFound() {
+        return new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 공지사항입니다.");
+    }
+}
