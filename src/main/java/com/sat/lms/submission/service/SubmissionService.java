@@ -106,9 +106,11 @@ public class SubmissionService {
                             stored.storageKey(), stored.extension(), stored.sizeKb()))
                     .toList();
             attachmentRepository.saveAll(attachments);
+            attachmentRepository.flush();
             submissionAttachmentRepository.saveAll(attachments.stream()
                     .map(attachment -> SubmissionAttachment.create(submission, attachment))
                     .toList());
+            submissionAttachmentRepository.flush();
             return SubmissionDetailResponse.from(submission, attachments);
         } catch (RuntimeException e) {
             compensate(uploaded);

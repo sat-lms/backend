@@ -253,6 +253,24 @@ class SubmissionServiceTest {
     }
 
     @Test
+    void flushFailureAfterSuccessfulSaveAllStillDeletesOrphanedS3Objects() {
+        givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
+        MultipartFile file = multipartFile("a.txt", 10);
+        StoredFile stored = new StoredFile("a.txt", "uuidA.txt", "submissions/42/uuidA.txt", "txt", 1L);
+        when(fileStorage.upload(file, "submissions/42")).thenReturn(stored);
+        // saveAll() succeeds (e.g. a deferred constraint), but the actual INSERT only fails at flush time.
+        org.mockito.Mockito.doThrow(new DataIntegrityViolationException("boom"))
+                .when(submissionAttachmentRepository).flush();
+
+        assertThatThrownBy(() -> service.submit(1L, 3L, request(null), List.of(file)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        verify(attachmentRepository).saveAll(any());
+        verify(submissionAttachmentRepository).saveAll(any());
+        verify(fileStorage).delete("submissions/42/uuidA.txt");
+    }
+
+    @Test
     void deletionFailureDuringCompensationDoesNotHideOriginalException() {
         givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
         MultipartFile file = multipartFile("a.txt", 10);
