@@ -9,12 +9,16 @@ import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.sat.lms.admin.service.MemberReviewService;
+import com.sat.lms.assignment.repository.AssignmentRepository;
+import com.sat.lms.attachment.repository.AttachmentRepository;
+import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
 import com.sat.lms.auth.service.AuthService;
 import com.sat.lms.global.exception.GlobalExceptionHandler;
 import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.member.repository.MemberReviewRepository;
 import com.sat.lms.notice.repository.NoticeReadRepository;
 import com.sat.lms.notice.repository.NoticeRepository;
+import com.sat.lms.submission.repository.SubmissionRepository;
 import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.storage.FileStorage;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -37,6 +41,10 @@ class LmsApplicationTests {
 	@MockitoBean MemberReviewRepository memberReviewRepository;
 	@MockitoBean NoticeRepository noticeRepository;
 	@MockitoBean NoticeReadRepository noticeReadRepository;
+	@MockitoBean AssignmentRepository assignmentRepository;
+	@MockitoBean AttachmentRepository attachmentRepository;
+	@MockitoBean SubmissionAttachmentRepository submissionAttachmentRepository;
+	@MockitoBean SubmissionRepository submissionRepository;
 	@MockitoBean JpaMetamodelMappingContext jpaMetamodelMappingContext;
 	@Autowired S3Client s3Client;
 	@Autowired S3Presigner s3Presigner;
