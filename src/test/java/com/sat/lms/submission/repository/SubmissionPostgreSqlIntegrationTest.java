@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpMethod;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -28,7 +29,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -205,6 +208,204 @@ class SubmissionPostgreSqlIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.textContent").value("제출 내용"));
+    }
+
+    @Test
+    void resubmitReplacesTextAndFilesAndDeletesOldS3Object() throws Exception {
+        Long studentId = insertMember("student08", "학생", "STUDENT");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        MockMultipartFile oldFile = new MockMultipartFile("files", "old.txt", "text/plain", "old".getBytes());
+        mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("첫 제출")).file(oldFile)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated());
+        String oldStorageKey = attachmentRepository.findAll().get(0).getStorageKey();
+
+        MockMultipartFile newFile = new MockMultipartFile("files", "new.txt", "text/plain", "new".getBytes());
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("수정된 제출")).file(newFile)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.textContent").value("수정된 제출"))
+                .andExpect(jsonPath("$.data.files[0].originalName").value("new.txt"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isEqualTo(1);
+        verify(fileStorage).delete(oldStorageKey);
+    }
+
+    @Test
+    void resubmitWithoutExistingSubmissionReturnsNotFound() throws Exception {
+        Long studentId = insertMember("student09", "학생", "STUDENT");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("재제출"))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void resubmitBlockedAfterDeadlineWithoutLateAllowance() throws Exception {
+        Long studentId = insertMember("student10", "학생", "STUDENT");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), true);
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("첫 제출"))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated());
+
+        jdbcTemplate.update("UPDATE assignment SET due_at = now() - interval '1 day', "
+                + "allow_late_submission = false WHERE id = ?", assignmentId);
+
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("재제출 시도"))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void deleteSubmissionRemovesAttachmentsAndCallsFileStorage() throws Exception {
+        Long studentId = insertMember("student11", "학생", "STUDENT");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        MockMultipartFile file = new MockMultipartFile("files", "a.txt", "text/plain", "a".getBytes());
+        mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("제출")).file(file)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated());
+        String storageKey = attachmentRepository.findAll().get(0).getStorageKey();
+
+        mockMvc.perform(delete("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        assertThat(submissionRepository.findByAssignmentIdAndStudentId(assignmentId, studentId)).isEmpty();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isEqualTo(0);
+        verify(fileStorage).delete(storageKey);
+    }
+
+    @Test
+    void deleteSubmissionMissingReturnsNotFound() throws Exception {
+        Long studentId = insertMember("student12", "학생", "STUDENT");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+
+        mockMvc.perform(delete("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void downloadUrlSucceedsForOwnerAndAdmin() throws Exception {
+        Long studentId = insertMember("student13", "학생", "STUDENT");
+        Long adminId = insertMember("admin13", "관리자", "ADMIN");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
+        String studentToken = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        String adminToken = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+        MockMultipartFile file = new MockMultipartFile("files", "a.txt", "text/plain", "a".getBytes());
+        mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("제출")).file(file)
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isCreated());
+        Long attachmentId = attachmentRepository.findAll().get(0).getId();
+        when(fileStorage.createDownloadUrl(anyString())).thenReturn("https://example.com/signed");
+
+        mockMvc.perform(get("/api/v1/submission-attachments/{attachmentId}/download-url", attachmentId)
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.downloadUrl").value("https://example.com/signed"))
+                .andExpect(jsonPath("$.data.originalName").value("a.txt"));
+
+        mockMvc.perform(get("/api/v1/submission-attachments/{attachmentId}/download-url", attachmentId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void downloadUrlForbiddenForOtherStudent() throws Exception {
+        Long studentId = insertMember("student14", "학생", "STUDENT");
+        Long otherId = insertMember("student15", "다른학생", "STUDENT");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
+        String studentToken = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        String otherToken = jwtTokenProvider.createAccessToken(otherId, "STUDENT");
+        MockMultipartFile file = new MockMultipartFile("files", "a.txt", "text/plain", "a".getBytes());
+        mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("제출")).file(file)
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isCreated());
+        Long attachmentId = attachmentRepository.findAll().get(0).getId();
+
+        mockMvc.perform(get("/api/v1/submission-attachments/{attachmentId}/download-url", attachmentId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void deleteAttachmentSucceedsWhenOtherFileRemains() throws Exception {
+        Long studentId = insertMember("student16", "학생", "STUDENT");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        MockMultipartFile fileA = new MockMultipartFile("files", "a.txt", "text/plain", "a".getBytes());
+        MockMultipartFile fileB = new MockMultipartFile("files", "b.txt", "text/plain", "b".getBytes());
+        mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart(null)).file(fileA).file(fileB)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated());
+        Long attachmentIdToDelete = attachmentRepository.findAll().stream()
+                .filter(a -> a.getOriginalName().equals("a.txt")).findFirst().orElseThrow().getId();
+
+        mockMvc.perform(delete("/api/v1/submission-attachments/{attachmentId}", attachmentIdToDelete)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isEqualTo(1);
+    }
+
+    @Test
+    void deleteAttachmentBlockedWhenResultingSubmissionWouldBeEmpty() throws Exception {
+        Long studentId = insertMember("student17", "학생", "STUDENT");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        MockMultipartFile file = new MockMultipartFile("files", "a.txt", "text/plain", "a".getBytes());
+        mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart(null)).file(file)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated());
+        Long attachmentId = attachmentRepository.findAll().get(0).getId();
+
+        mockMvc.perform(delete("/api/v1/submission-attachments/{attachmentId}", attachmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isEqualTo(1);
+    }
+
+    @Test
+    void adminAndUnauthenticatedCannotPerformStudentOnlySubmissionActions() throws Exception {
+        Long studentId = insertMember("student18", "학생", "STUDENT");
+        Long adminId = insertMember("admin18", "관리자", "ADMIN");
+        Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
+        String studentToken = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        String adminToken = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+        mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("제출"))
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("관리자 수정"))
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("무인증 수정")))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/v1/assignments/{assignmentId}/submission", assignmentId))
+                .andExpect(status().isUnauthorized());
     }
 
     private MockMultipartFile jsonPart(String textContent) throws Exception {

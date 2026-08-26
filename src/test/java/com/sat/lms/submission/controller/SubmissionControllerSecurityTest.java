@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpMethod;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -18,9 +19,11 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -108,6 +111,50 @@ class SubmissionControllerSecurityTest {
                 .andExpect(status().isCreated());
 
         verify(submissionService).submit(eq(1L), eq(8L), any(), eq(List.of(file)));
+    }
+
+    @Test
+    void studentCanResubmitUsingAuthenticatedId() throws Exception {
+        authenticate("student", 8L, "STUDENT");
+        SubmissionDetailResponse response = detailResponse();
+        when(submissionService.resubmit(eq(1L), eq(8L), any(), any())).thenReturn(response);
+        MockMultipartFile request = new MockMultipartFile("request", "request", "application/json",
+                "{\"textContent\":\"수정합니다.\"}".getBytes());
+
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", 1L)
+                        .file(request)
+                        .header("Authorization", "Bearer student"))
+                .andExpect(status().isOk());
+
+        verify(submissionService).resubmit(eq(1L), eq(8L), any(), any());
+    }
+
+    @Test
+    void unauthenticatedResubmitReturnsUnauthorized() throws Exception {
+        MockMultipartFile request = new MockMultipartFile("request", "request", "application/json",
+                "{\"textContent\":\"수정합니다.\"}".getBytes());
+
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", 1L)
+                        .file(request))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void studentCanDeleteOwnSubmission() throws Exception {
+        authenticate("student", 8L, "STUDENT");
+        doNothing().when(submissionService).deleteSubmission(1L, 8L);
+
+        mockMvc.perform(delete("/api/v1/assignments/{assignmentId}/submission", 1L)
+                        .header("Authorization", "Bearer student"))
+                .andExpect(status().isOk());
+
+        verify(submissionService).deleteSubmission(1L, 8L);
+    }
+
+    @Test
+    void unauthenticatedDeleteReturnsUnauthorized() throws Exception {
+        mockMvc.perform(delete("/api/v1/assignments/{assignmentId}/submission", 1L))
+                .andExpect(status().isUnauthorized());
     }
 
     private SubmissionDetailResponse detailResponse() {

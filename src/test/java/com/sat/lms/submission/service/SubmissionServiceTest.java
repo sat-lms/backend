@@ -6,6 +6,7 @@ import com.sat.lms.attachment.entity.Attachment;
 import com.sat.lms.attachment.entity.SubmissionAttachment;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
+import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
@@ -44,6 +45,7 @@ class SubmissionServiceTest {
     AttachmentRepository attachmentRepository;
     SubmissionAttachmentRepository submissionAttachmentRepository;
     FileStorage fileStorage;
+    AwsProperties awsProperties;
     SubmissionService service;
 
     @BeforeEach
@@ -54,8 +56,10 @@ class SubmissionServiceTest {
         attachmentRepository = mock(AttachmentRepository.class);
         submissionAttachmentRepository = mock(SubmissionAttachmentRepository.class);
         fileStorage = mock(FileStorage.class);
+        awsProperties = new AwsProperties();
+        awsProperties.getS3().setPresignedExpirationMinutes(5);
         service = new SubmissionService(submissionRepository, assignmentRepository, memberRepository,
-                attachmentRepository, submissionAttachmentRepository, fileStorage);
+                attachmentRepository, submissionAttachmentRepository, fileStorage, awsProperties);
 
         when(submissionRepository.save(any())).thenAnswer(invocation -> {
             Submission submission = invocation.getArgument(0);
@@ -313,6 +317,338 @@ class SubmissionServiceTest {
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
     }
 
+    @Test
+    void resubmitReplacesTextOnlyWhenNoNewFiles() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "old text", false);
+        Attachment oldAttachment = attachment("old.txt", "submissions/5/old.txt");
+        SubmissionAttachment oldLink = SubmissionAttachment.create(submission, oldAttachment);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(oldLink));
+
+        var response = service.resubmit(1L, 3L, request("new text"), null);
+
+        assertThat(response.getTextContent()).isEqualTo("new text");
+        assertThat(response.getFiles()).isEmpty();
+        verify(submissionAttachmentRepository).deleteAll(List.of(oldLink));
+        verify(attachmentRepository).deleteAll(List.of(oldAttachment));
+        verify(fileStorage).delete("submissions/5/old.txt");
+        verify(fileStorage, never()).upload(any(), anyString());
+    }
+
+    @Test
+    void resubmitReplacesFilesAndDeletesOldS3Objects() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "old text", false);
+        Attachment oldAttachment = attachment("old.txt", "submissions/5/old.txt");
+        SubmissionAttachment oldLink = SubmissionAttachment.create(submission, oldAttachment);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(oldLink));
+        MultipartFile newFile = multipartFile("new.txt", 10);
+        StoredFile storedNew = new StoredFile("new.txt", "uuidNew.txt", "submissions/5/uuidNew.txt", "txt", 1L);
+        when(fileStorage.upload(newFile, "submissions/5")).thenReturn(storedNew);
+
+        var response = service.resubmit(1L, 3L, request(null), List.of(newFile));
+
+        assertThat(response.getFiles()).hasSize(1);
+        assertThat(response.getFiles().get(0).getOriginalName()).isEqualTo("new.txt");
+        verify(fileStorage).upload(newFile, "submissions/5");
+        verify(fileStorage).delete("submissions/5/old.txt");
+        verify(fileStorage, never()).delete("submissions/5/uuidNew.txt");
+    }
+
+    @Test
+    void resubmitWithoutExistingSubmissionReturnsNotFound() {
+        givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.resubmit(1L, 3L, request("내용"), null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
+    @Test
+    void resubmitBlockedWhenLateNotAllowed() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().minusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "old", false);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
+
+        assertThatThrownBy(() -> service.resubmit(1L, 3L, request("내용"), null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verify(submissionAttachmentRepository, never()).deleteAll(any());
+    }
+
+    @Test
+    void resubmitDbFailureCompensatesOnlyNewlyUploadedFiles() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "old", false);
+        Attachment oldAttachment = attachment("old.txt", "submissions/5/old.txt");
+        SubmissionAttachment oldLink = SubmissionAttachment.create(submission, oldAttachment);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(oldLink));
+        MultipartFile newFile = multipartFile("new.txt", 10);
+        StoredFile storedNew = new StoredFile("new.txt", "uuidNew.txt", "submissions/5/uuidNew.txt", "txt", 1L);
+        when(fileStorage.upload(newFile, "submissions/5")).thenReturn(storedNew);
+        when(submissionAttachmentRepository.saveAll(any())).thenThrow(new DataIntegrityViolationException("boom"));
+
+        assertThatThrownBy(() -> service.resubmit(1L, 3L, request(null), List.of(newFile)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        verify(fileStorage).delete("submissions/5/uuidNew.txt");
+        verify(fileStorage, never()).delete("submissions/5/old.txt");
+        verify(attachmentRepository, never()).deleteAll(any());
+    }
+
+    @Test
+    void deleteSubmissionRemovesAttachmentsAndSubmission() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "text", false);
+        Attachment attachment1 = attachment("a.txt", "submissions/5/a.txt");
+        Attachment attachment2 = attachment("b.txt", "submissions/5/b.txt");
+        SubmissionAttachment link1 = SubmissionAttachment.create(submission, attachment1);
+        SubmissionAttachment link2 = SubmissionAttachment.create(submission, attachment2);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L))
+                .thenReturn(List.of(link1, link2));
+
+        service.deleteSubmission(1L, 3L);
+
+        verify(submissionAttachmentRepository).deleteAll(List.of(link1, link2));
+        verify(attachmentRepository).deleteAll(List.of(attachment1, attachment2));
+        verify(submissionRepository).delete(submission);
+        verify(fileStorage).delete("submissions/5/a.txt");
+        verify(fileStorage).delete("submissions/5/b.txt");
+    }
+
+    @Test
+    void deleteSubmissionMissingReturnsNotFound() {
+        Member student = student(3L);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.deleteSubmission(1L, 3L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
+    @Test
+    void getDownloadUrlSucceedsForOwner() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "text", false);
+        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
+                .thenReturn(Optional.of(link));
+        when(fileStorage.createDownloadUrl("submissions/5/a.txt")).thenReturn("https://example.com/signed");
+
+        var response = service.getDownloadUrl(10L, 3L);
+
+        assertThat(response.getDownloadUrl()).isEqualTo("https://example.com/signed");
+        assertThat(response.getExpiresIn()).isEqualTo(300L);
+        assertThat(response.getOriginalName()).isEqualTo("a.txt");
+    }
+
+    @Test
+    void getDownloadUrlSucceedsForAdmin() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "text", false);
+        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
+        Member admin = mock(Member.class);
+        when(admin.getId()).thenReturn(7L);
+        when(admin.getRole()).thenReturn(MemberRole.ADMIN);
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
+                .thenReturn(Optional.of(link));
+        when(fileStorage.createDownloadUrl("submissions/5/a.txt")).thenReturn("https://example.com/signed");
+
+        var response = service.getDownloadUrl(10L, 7L);
+
+        assertThat(response.getDownloadUrl()).isEqualTo("https://example.com/signed");
+    }
+
+    @Test
+    void getDownloadUrlForbiddenForOtherStudent() {
+        Member owner = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, owner, assignment, "text", false);
+        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
+        Member other = student(8L);
+        when(memberRepository.findById(8L)).thenReturn(Optional.of(other));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
+                .thenReturn(Optional.of(link));
+
+        assertThatThrownBy(() -> service.getDownloadUrl(10L, 8L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
+    }
+
+    @Test
+    void getDownloadUrlMissingAttachmentReturnsNotFound() {
+        Member student = student(3L);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(99L))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getDownloadUrl(99L, 3L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
+    @Test
+    void deleteAttachmentSucceedsWhenOtherFileRemains() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, null, false);
+        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
+                .thenReturn(Optional.of(link));
+        when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(2L);
+
+        service.deleteAttachment(10L, 3L);
+
+        verify(fileStorage).delete("submissions/5/a.txt");
+        verify(submissionAttachmentRepository).delete(link);
+        verify(attachmentRepository).delete(targetAttachment);
+    }
+
+    @Test
+    void deleteAttachmentBlockedWhenResultingSubmissionWouldBeEmpty() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, null, false);
+        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
+                .thenReturn(Optional.of(link));
+        when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(1L);
+
+        assertThatThrownBy(() -> service.deleteAttachment(10L, 3L))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getMessage()).contains("DELETE");
+                });
+        verify(fileStorage, never()).delete(anyString());
+        verify(submissionAttachmentRepository, never()).delete(any());
+    }
+
+    @Test
+    void deleteAttachmentAllowedWhenTextRemains() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "남은 텍스트", false);
+        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
+                .thenReturn(Optional.of(link));
+        when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(1L);
+
+        service.deleteAttachment(10L, 3L);
+
+        verify(fileStorage).delete("submissions/5/a.txt");
+    }
+
+    @Test
+    void deleteAttachmentForbiddenForNonOwnerStudent() {
+        Member owner = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, owner, assignment, "text", false);
+        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
+        Member other = student(8L);
+        when(memberRepository.findById(8L)).thenReturn(Optional.of(other));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
+                .thenReturn(Optional.of(link));
+
+        assertThatThrownBy(() -> service.deleteAttachment(10L, 8L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
+    }
+
+    @Test
+    void deleteAttachmentForbiddenForAdmin() {
+        Member admin = mock(Member.class);
+        when(admin.getRole()).thenReturn(MemberRole.ADMIN);
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+
+        assertThatThrownBy(() -> service.deleteAttachment(10L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
+        verify(submissionAttachmentRepository, never()).findWithSubmissionAndAttachmentByAttachmentId(any());
+    }
+
+    @Test
+    void deleteAttachmentBlockedWhenLateNotAllowed() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().minusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "text", true);
+        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
+                .thenReturn(Optional.of(link));
+
+        assertThatThrownBy(() -> service.deleteAttachment(10L, 3L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verify(fileStorage, never()).delete(anyString());
+    }
+
+    @Test
+    void deleteAttachmentDoesNotTouchS3WhenDbDeleteFails() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, null, false);
+        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
+                .thenReturn(Optional.of(link));
+        when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(2L);
+        org.mockito.Mockito.doThrow(new DataIntegrityViolationException("boom"))
+                .when(submissionAttachmentRepository).flush();
+
+        assertThatThrownBy(() -> service.deleteAttachment(10L, 3L))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        verify(fileStorage, never()).delete(anyString());
+    }
+
+    @Test
+    void deleteAttachmentMissingReturnsNotFound() {
+        Member student = student(3L);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(99L))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.deleteAttachment(99L, 3L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
     private void givenStudentAndAssignment(Long memberId, boolean allowLate, OffsetDateTime dueAt) {
         Member student = student(memberId);
         Assignment assignment = assignment(allowLate, dueAt);
@@ -339,6 +675,17 @@ class SubmissionServiceTest {
         when(assignment.getDueAt()).thenReturn(dueAt.withOffsetSameInstant(ZoneOffset.UTC));
         when(assignment.isAllowLateSubmission()).thenReturn(allowLate);
         return assignment;
+    }
+
+    private Submission existingSubmission(Long id, Member student, Assignment assignment, String textContent,
+                                          boolean late) {
+        Submission submission = Submission.create(assignment, student, textContent, late);
+        setId(submission, id);
+        return submission;
+    }
+
+    private Attachment attachment(String originalName, String storageKey) {
+        return Attachment.create(originalName, "stored-" + originalName, storageKey, "txt", 1L);
     }
 
     private MultipartFile multipartFile(String originalName, long size) {
