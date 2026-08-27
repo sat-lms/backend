@@ -35,6 +35,9 @@ public class SecurityConfig {
                         .authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/submission-attachments/*").authenticated()
                         .requestMatchers("/api/v1/admin/member-applications/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/assignments/*/submissions")
+                        .hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/submissions/*").hasRole("ADMIN")
                         .requestMatchers("/api/v1/members/me").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint((request, response, exception) -> {
