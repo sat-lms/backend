@@ -4,6 +4,7 @@ import com.sat.lms.submission.dto.SubmissionListResponse;
 import com.sat.lms.submission.entity.Submission;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,6 +13,8 @@ import java.util.Optional;
 
 public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     Optional<Submission> findByAssignmentIdAndStudentId(Long assignmentId, Long studentId);
+
+    boolean existsByAssignmentId(Long assignmentId);
 
     @Query(value = """
             select new com.sat.lms.submission.dto.SubmissionListResponse(
@@ -26,5 +29,8 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
             """)
     Page<SubmissionListResponse> findSubmissionPageByStudentId(@Param("studentId") Long studentId,
                                                                Pageable pageable);
-    boolean existsByAssignmentId(Long assignmentId);
+
+    @EntityGraph(attributePaths = {"student", "assignment"})
+    @Query("select s from Submission s where s.id = :submissionId")
+    Optional<Submission> findWithStudentAndAssignmentById(@Param("submissionId") Long submissionId);
 }
