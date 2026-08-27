@@ -1,18 +1,20 @@
 package com.sat.lms.submission.dto;
 
 public class AdminAssignmentSubmissionCounts {
-    private final long onTimeSubmittedCount;
-    private final long lateSubmittedCount;
+    private final long submittedCount;
     private final long notSubmittedCount;
+    /** submittedCount의 부분집합입니다(제출 중 지각 제출 건수). submittedCount + notSubmittedCount만 전체 학생 수와 일치합니다. */
+    private final long lateCount;
 
-    public AdminAssignmentSubmissionCounts(Long onTimeSubmittedCount, Long lateSubmittedCount,
-                                           Long notSubmittedCount) {
-        this.onTimeSubmittedCount = onTimeSubmittedCount == null ? 0L : onTimeSubmittedCount;
-        this.lateSubmittedCount = lateSubmittedCount == null ? 0L : lateSubmittedCount;
+    public AdminAssignmentSubmissionCounts(Long submittedCount, Long notSubmittedCount, Long lateCount) {
+        this.submittedCount = submittedCount == null ? 0L : submittedCount;
         this.notSubmittedCount = notSubmittedCount == null ? 0L : notSubmittedCount;
+        this.lateCount = lateCount == null ? 0L : lateCount;
     }
 
-    public long getOnTimeSubmittedCount() { return onTimeSubmittedCount; }
-    public long getLateSubmittedCount() { return lateSubmittedCount; }
+    public long getSubmittedCount() { return submittedCount; }
     public long getNotSubmittedCount() { return notSubmittedCount; }
+
+    /** submittedCount의 부분집합입니다(제출 중 지각 제출 건수). */
+    public long getLateCount() { return lateCount; }
 }

@@ -51,7 +51,7 @@ class AdminSubmissionControllerSecurityTest {
         mockMvc.perform(get("/api/v1/admin/assignments/{assignmentId}/submissions", 1L)
                         .header("Authorization", "Bearer admin"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.onTimeSubmittedCount").value(1))
+                .andExpect(jsonPath("$.data.submittedCount").value(1))
                 .andExpect(jsonPath("$.data.students.content[0].studentNumber").value("20231234"));
 
         verify(adminSubmissionService).getSubmissionStatus(eq(1L), isNull(), any(), eq(7L));

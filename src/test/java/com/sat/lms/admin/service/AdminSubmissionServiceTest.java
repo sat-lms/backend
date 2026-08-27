@@ -56,7 +56,7 @@ class AdminSubmissionServiceTest {
         Member admin = admin(7L);
         when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
         when(assignmentRepository.existsById(1L)).thenReturn(true);
-        AdminAssignmentSubmissionCounts counts = new AdminAssignmentSubmissionCounts(1L, 1L, 2L);
+        AdminAssignmentSubmissionCounts counts = new AdminAssignmentSubmissionCounts(2L, 2L, 1L);
         when(memberRepository.countSubmissionStatusByAssignmentId(1L)).thenReturn(counts);
         Pageable pageable = PageRequest.of(0, 20);
         AdminSubmissionStudentRow row = new AdminSubmissionStudentRow(10L, "20231234", "학생",
@@ -66,9 +66,9 @@ class AdminSubmissionServiceTest {
 
         var response = service.getSubmissionStatus(1L, null, pageable, 7L);
 
-        assertThat(response.getOnTimeSubmittedCount()).isEqualTo(1L);
-        assertThat(response.getLateSubmittedCount()).isEqualTo(1L);
+        assertThat(response.getSubmittedCount()).isEqualTo(2L);
         assertThat(response.getNotSubmittedCount()).isEqualTo(2L);
+        assertThat(response.getLateCount()).isEqualTo(1L);
         assertThat(response.getStudents().getContent()).hasSize(1);
         assertThat(response.getStudents().getContent().get(0).getStudentNumber()).isEqualTo("20231234");
     }

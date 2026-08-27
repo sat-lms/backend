@@ -51,8 +51,8 @@ public class AdminSubmissionService {
         Page<AdminSubmissionStudentRow> students = memberRepository
                 .findStudentSubmissionStatusPage(assignmentId, statusName, pageable);
 
-        return new AdminSubmissionSummaryResponse(counts.getOnTimeSubmittedCount(), counts.getLateSubmittedCount(),
-                counts.getNotSubmittedCount(), PageResponse.from(students));
+        return new AdminSubmissionSummaryResponse(counts.getSubmittedCount(), counts.getNotSubmittedCount(),
+                counts.getLateCount(), PageResponse.from(students));
     }
 
     public AdminSubmissionDetailResponse getSubmissionDetail(Long submissionId, Long memberId) {

@@ -106,8 +106,8 @@ class AdminSubmissionPostgreSqlIntegrationTest {
         mockMvc.perform(get("/api/v1/admin/assignments/{assignmentId}/submissions", assignmentId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.onTimeSubmittedCount").value(1))
-                .andExpect(jsonPath("$.data.lateSubmittedCount").value(1))
+                .andExpect(jsonPath("$.data.submittedCount").value(2))
+                .andExpect(jsonPath("$.data.lateCount").value(1))
                 .andExpect(jsonPath("$.data.notSubmittedCount").value(2))
                 .andExpect(jsonPath("$.data.students.totalElements").value(4));
 
@@ -116,7 +116,7 @@ class AdminSubmissionPostgreSqlIntegrationTest {
     }
 
     @Test
-    void countsAreMutuallyExclusiveAndSumToApprovedStudentTotal() throws Exception {
+    void submittedAndNotSubmittedCountsSumToApprovedStudentTotalAndLateIsSubsetOfSubmitted() throws Exception {
         Long adminId = insertMember("admin09", "관리자", "ADMIN", "APPROVED");
         String adminToken = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
         Long assignmentId = insertAssignment(adminId);
@@ -135,14 +135,15 @@ class AdminSubmissionPostgreSqlIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).get("data");
-        long onTime = data.get("onTimeSubmittedCount").asLong();
-        long late = data.get("lateSubmittedCount").asLong();
+        long submitted = data.get("submittedCount").asLong();
+        long late = data.get("lateCount").asLong();
         long notSubmitted = data.get("notSubmittedCount").asLong();
 
-        assertThat(onTime).isEqualTo(1L);
+        assertThat(submitted).isEqualTo(2L);
         assertThat(late).isEqualTo(1L);
         assertThat(notSubmitted).isEqualTo(3L);
-        assertThat(onTime + late + notSubmitted).isEqualTo(approvedStudentTotal);
+        assertThat(submitted + notSubmitted).isEqualTo(approvedStudentTotal);
+        assertThat(late).isLessThanOrEqualTo(submitted);
     }
 
     @Test
@@ -188,8 +189,8 @@ class AdminSubmissionPostgreSqlIntegrationTest {
         mockMvc.perform(get("/api/v1/admin/assignments/{assignmentId}/submissions", assignmentId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.onTimeSubmittedCount").value(0))
-                .andExpect(jsonPath("$.data.lateSubmittedCount").value(0))
+                .andExpect(jsonPath("$.data.submittedCount").value(0))
+                .andExpect(jsonPath("$.data.lateCount").value(0))
                 .andExpect(jsonPath("$.data.notSubmittedCount").value(0))
                 .andExpect(jsonPath("$.data.students.totalElements").value(0));
     }

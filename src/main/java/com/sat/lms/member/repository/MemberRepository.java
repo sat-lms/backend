@@ -51,15 +51,14 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
     @Query("""
             select new com.sat.lms.submission.dto.AdminAssignmentSubmissionCounts(
                 sum(case when exists (
-                        select 1 from Submission s
-                        where s.student = m and s.assignment.id = :assignmentId and s.late = false)
+                        select 1 from Submission s where s.student = m and s.assignment.id = :assignmentId)
+                    then 1L else 0L end),
+                sum(case when not exists (
+                        select 1 from Submission s where s.student = m and s.assignment.id = :assignmentId)
                     then 1L else 0L end),
                 sum(case when exists (
                         select 1 from Submission s
                         where s.student = m and s.assignment.id = :assignmentId and s.late = true)
-                    then 1L else 0L end),
-                sum(case when not exists (
-                        select 1 from Submission s where s.student = m and s.assignment.id = :assignmentId)
                     then 1L else 0L end))
             from Member m
             where m.role = com.sat.lms.member.entity.MemberRole.STUDENT
