@@ -31,6 +31,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/assignments/*/submission").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/assignments/*/submission").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/assignments/*/submission").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assignments").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/assignments/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/assignments/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assignments/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/submission-attachments/*/download-url")
                         .authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/submission-attachments/*").authenticated()
@@ -39,6 +43,7 @@ public class SecurityConfig {
                         .hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/submissions/*").hasRole("ADMIN")
                         .requestMatchers("/api/v1/members/me").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/members/me/submissions").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint((request, response, exception) -> {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
