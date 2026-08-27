@@ -3,6 +3,7 @@ package com.sat.lms;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.autoconfigure.web.servlet.MultipartProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
@@ -11,6 +12,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.sat.lms.admin.service.MemberReviewService;
 import com.sat.lms.assignment.repository.AssignmentRepository;
 import com.sat.lms.attachment.repository.AttachmentRepository;
+import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
 import com.sat.lms.auth.service.AuthService;
 import com.sat.lms.global.exception.GlobalExceptionHandler;
@@ -43,6 +45,7 @@ class LmsApplicationTests {
 	@MockitoBean NoticeReadRepository noticeReadRepository;
 	@MockitoBean AssignmentRepository assignmentRepository;
 	@MockitoBean AttachmentRepository attachmentRepository;
+	@MockitoBean NoticeAttachmentRepository noticeAttachmentRepository;
 	@MockitoBean SubmissionAttachmentRepository submissionAttachmentRepository;
 	@MockitoBean SubmissionRepository submissionRepository;
 	@MockitoBean JpaMetamodelMappingContext jpaMetamodelMappingContext;
@@ -50,6 +53,7 @@ class LmsApplicationTests {
 	@Autowired S3Presigner s3Presigner;
 	@Autowired AwsProperties awsProperties;
 	@Autowired FileStorage fileStorage;
+	@Autowired MultipartProperties multipartProperties;
 
 	@Test
 	void contextLoads() {
@@ -61,6 +65,8 @@ class LmsApplicationTests {
 		assertThat(s3Presigner).isNotNull();
 		assertThat(awsProperties.getRegion()).isEqualTo("ap-northeast-2");
 		assertThat(fileStorage).isNotNull();
+		assertThat(multipartProperties.getMaxFileSize().toMegabytes()).isEqualTo(50L);
+		assertThat(multipartProperties.getMaxRequestSize().toMegabytes()).isEqualTo(100L);
 	}
 
 }

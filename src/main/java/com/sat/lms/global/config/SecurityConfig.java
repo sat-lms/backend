@@ -23,6 +23,9 @@ public class SecurityConfig {
         return http.csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.POST, "/api/v1/notices/*/attachments").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/notice-attachments/*/download-url").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/notice-attachments/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/notices").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/notices/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/notices/**").hasRole("ADMIN")

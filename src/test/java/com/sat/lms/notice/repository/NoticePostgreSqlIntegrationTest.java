@@ -19,6 +19,8 @@ import com.sat.lms.notice.entity.Notice;
 import com.sat.lms.notice.entity.NoticeRead;
 import com.sat.lms.notice.service.NoticeService;
 import com.sat.lms.global.security.JwtTokenProvider;
+import com.sat.lms.global.storage.FileStorage;
+import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.submission.entity.Submission;
 import jakarta.persistence.EntityManager;
 import org.flywaydb.core.Flyway;
@@ -33,8 +35,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -45,6 +49,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -54,7 +59,16 @@ import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.hamcrest.Matchers.endsWith;
@@ -96,6 +110,7 @@ class NoticePostgreSqlIntegrationTest {
     @Autowired Environment environment;
     @Autowired MockMvc mockMvc;
     @Autowired JwtTokenProvider jwtTokenProvider;
+    @MockitoBean FileStorage fileStorage;
 
     @BeforeEach
     void cleanData() {
@@ -457,6 +472,146 @@ class NoticePostgreSqlIntegrationTest {
                 .andExpect(jsonPath("$.data.createdAt", endsWith("Z")))
                 .andExpect(jsonPath("$.data.updatedAt", endsWith("Z")));
         assertThat(noticeReadRepository.existsByNoticeIdAndMemberId(noticeId, studentId)).isTrue();
+    }
+
+    @Test
+    void noticeAttachmentUploadPersistsMetadataAndLinksAndSupportsDownload() throws Exception {
+        Long adminId = insertMember("admin10", "첨부관리자", "ADMIN");
+        Long studentId = insertMember("student10", "다운학생", "STUDENT");
+        Long noticeId = insertNotice(adminId, "첨부 공지", false, OffsetDateTime.now(ZoneOffset.UTC));
+        MockMultipartFile first = multipartFile("안내.PDF", "첫 파일");
+        MockMultipartFile second = multipartFile("서식.HWPX", "두 번째 파일");
+        String firstStored = "11111111-1111-1111-1111-111111111111.pdf";
+        String secondStored = "22222222-2222-2222-2222-222222222222.hwpx";
+        when(fileStorage.upload(any(), eq("notices/" + noticeId))).thenReturn(
+                new StoredFile("안내.PDF", firstStored, "notices/" + noticeId + "/" + firstStored, "pdf", 1L),
+                new StoredFile("서식.HWPX", secondStored, "notices/" + noticeId + "/" + secondStored, "hwpx", 1L));
+
+        mockMvc.perform(multipart("/api/v1/notices/{noticeId}/attachments", noticeId)
+                        .file(first).file(second)
+                        .header("Authorization", "Bearer " + jwtTokenProvider.createAccessToken(adminId, "ADMIN"))
+                        .characterEncoding(StandardCharsets.UTF_8))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].originalName").value("안내.PDF"))
+                .andExpect(jsonPath("$.data[0].extension").value("pdf"))
+                .andExpect(jsonPath("$.data[0].storageKey").doesNotExist())
+                .andExpect(jsonPath("$.data[0].storedName").doesNotExist());
+
+        List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT id, original_name, stored_name, storage_key, extension, size_kb FROM attachment ORDER BY id");
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).get("original_name")).isEqualTo("안내.PDF");
+        assertThat(rows.get(0).get("stored_name")).isEqualTo(firstStored);
+        assertThat(rows.get(0).get("storage_key")).isEqualTo("notices/" + noticeId + "/" + firstStored);
+        assertThat(rows.get(0).get("extension")).isEqualTo("pdf");
+        assertThat(rows.get(0).get("size_kb")).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM notice_attachment WHERE notice_id = ?",
+                Long.class, noticeId)).isEqualTo(2L);
+
+        Long attachmentId = ((Number) rows.get(0).get("id")).longValue();
+        when(fileStorage.createDownloadUrl("notices/" + noticeId + "/" + firstStored))
+                .thenReturn("https://example.test/signed");
+        mockMvc.perform(get("/api/v1/notice-attachments/{attachmentId}/download-url", attachmentId)
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(studentId, "STUDENT")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.downloadUrl").value("https://example.test/signed"))
+                .andExpect(jsonPath("$.data.expiresIn").value(300))
+                .andExpect(jsonPath("$.data.originalName").value("안내.PDF"));
+    }
+
+    @Test
+    void uploadDatabaseFailureRollsBackRowsAndCompensatesStorage() throws Exception {
+        Long adminId = insertMember("admin11", "실패관리자", "ADMIN");
+        Long noticeId = insertNotice(adminId, "실패 공지", false, OffsetDateTime.now(ZoneOffset.UTC));
+        String storedName = "33333333-3333-3333-3333-333333333333.pdf";
+        String storageKey = "notices/" + noticeId + "/" + storedName;
+        when(fileStorage.upload(any(), anyString())).thenReturn(
+                new StoredFile("a.pdf", storedName, storageKey, "pdf", 1L),
+                new StoredFile("b.pdf", storedName, storageKey, "pdf", 1L));
+
+        mockMvc.perform(multipart("/api/v1/notices/{noticeId}/attachments", noticeId)
+                        .file(multipartFile("a.pdf", "a")).file(multipartFile("b.pdf", "b"))
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(adminId, "ADMIN")))
+                .andExpect(status().isConflict());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM notice_attachment", Long.class)).isZero();
+        verify(fileStorage, times(2)).delete(storageKey);
+    }
+
+    @Test
+    void otherDomainAttachmentCannotDownloadAndDeleteRunsAfterCommittedDatabaseRemoval() throws Exception {
+        Long adminId = insertMember("admin12", "삭제관리자", "ADMIN");
+        Long studentId = insertMember("student12", "학생", "STUDENT");
+        Long noticeId = insertNotice(adminId, "삭제 공지", false, OffsetDateTime.now(ZoneOffset.UTC));
+        Long noticeAttachmentId = insertAttachment("notices/" + noticeId + "/notice.pdf");
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?)",
+                noticeId, noticeAttachmentId);
+        Long assignmentId = insertAssignment(adminId, "다른 도메인");
+        Long otherAttachmentId = insertAttachment("assignments/" + assignmentId + "/other.pdf");
+        jdbcTemplate.update("INSERT INTO assignment_attachment (assignment_id, attachment_id) VALUES (?, ?)",
+                assignmentId, otherAttachmentId);
+        String studentToken = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+
+        mockMvc.perform(get("/api/v1/notice-attachments/{id}/download-url", otherAttachmentId)
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isNotFound());
+        verify(fileStorage, never()).createDownloadUrl(anyString());
+
+        mockMvc.perform(delete("/api/v1/notice-attachments/{id}", noticeAttachmentId)
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(adminId, "ADMIN")))
+                .andExpect(status().isOk());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM notice_attachment WHERE attachment_id = ?", Long.class,
+                noticeAttachmentId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM attachment WHERE id = ?", Long.class, noticeAttachmentId)).isZero();
+        verify(fileStorage).delete("notices/" + noticeId + "/notice.pdf");
+    }
+
+    @Test
+    void deleteDatabaseFailureRollsBackRowsAndKeepsStorageObject() throws Exception {
+        Long adminId = insertMember("admin13", "롤백관리자", "ADMIN");
+        Long noticeId = insertNotice(adminId, "롤백 공지", false, OffsetDateTime.now(ZoneOffset.UTC));
+        String storageKey = "notices/" + noticeId + "/rollback.pdf";
+        Long attachmentId = insertAttachment(storageKey);
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?)",
+                noticeId, attachmentId);
+        jdbcTemplate.execute("""
+                CREATE FUNCTION fail_notice_attachment_delete() RETURNS trigger AS $$
+                BEGIN RAISE EXCEPTION 'forced delete failure'; END;
+                $$ LANGUAGE plpgsql
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER trg_fail_notice_attachment_delete
+                BEFORE DELETE ON notice_attachment
+                FOR EACH ROW EXECUTE FUNCTION fail_notice_attachment_delete()
+                """);
+        try {
+            mockMvc.perform(delete("/api/v1/notice-attachments/{id}", attachmentId)
+                            .header("Authorization", "Bearer "
+                                    + jwtTokenProvider.createAccessToken(adminId, "ADMIN")))
+                    .andExpect(status().is5xxServerError());
+
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM notice_attachment WHERE attachment_id = ?", Long.class,
+                    attachmentId)).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM attachment WHERE id = ?", Long.class, attachmentId)).isEqualTo(1L);
+            verify(fileStorage, never()).delete(storageKey);
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_fail_notice_attachment_delete ON notice_attachment");
+            jdbcTemplate.execute("DROP FUNCTION IF EXISTS fail_notice_attachment_delete()");
+        }
+    }
+
+    private MockMultipartFile multipartFile(String originalName, String content) {
+        return new MockMultipartFile("files", originalName, "application/octet-stream",
+                content.getBytes(StandardCharsets.UTF_8));
     }
 
     private Long insertMember(String studentNumber, String name, String role) {
