@@ -15,6 +15,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -42,7 +43,7 @@ class SubmissionControllerSecurityTest {
         SubmissionDetailResponse response = detailResponse();
         when(submissionService.submit(eq(1L), eq(8L), any(), any())).thenReturn(response);
         MockMultipartFile request = new MockMultipartFile("request", "request", "application/json",
-                "{\"textContent\":\"제출합니다.\"}".getBytes());
+                "{\"textContent\":\"제출합니다.\"}".getBytes(StandardCharsets.UTF_8));
 
         mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", 1L)
                         .file(request)
@@ -58,7 +59,7 @@ class SubmissionControllerSecurityTest {
         SubmissionDetailResponse response = detailResponse();
         when(submissionService.submit(eq(1L), eq(7L), any(), any())).thenReturn(response);
         MockMultipartFile request = new MockMultipartFile("request", "request", "application/json",
-                "{\"textContent\":\"제출합니다.\"}".getBytes());
+                "{\"textContent\":\"제출합니다.\"}".getBytes(StandardCharsets.UTF_8));
 
         mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", 1L)
                         .file(request)
@@ -71,7 +72,7 @@ class SubmissionControllerSecurityTest {
     @Test
     void unauthenticatedSubmitReturnsUnauthorized() throws Exception {
         MockMultipartFile request = new MockMultipartFile("request", "request", "application/json",
-                "{\"textContent\":\"제출합니다.\"}".getBytes());
+                "{\"textContent\":\"제출합니다.\"}".getBytes(StandardCharsets.UTF_8));
 
         mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", 1L).file(request))
                 .andExpect(status().isUnauthorized())
@@ -102,8 +103,9 @@ class SubmissionControllerSecurityTest {
         SubmissionDetailResponse response = detailResponse();
         when(submissionService.submit(eq(1L), eq(8L), any(), any())).thenReturn(response);
         MockMultipartFile request = new MockMultipartFile("request", "request", "application/json",
-                "{}".getBytes());
-        MockMultipartFile file = new MockMultipartFile("files", "Member.java", "text/plain", "code".getBytes());
+                "{}".getBytes(StandardCharsets.UTF_8));
+        MockMultipartFile file = new MockMultipartFile("files", "Member.java", "text/plain",
+                "code".getBytes(StandardCharsets.UTF_8));
 
         mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", 1L)
                         .file(request).file(file)
@@ -119,7 +121,7 @@ class SubmissionControllerSecurityTest {
         SubmissionDetailResponse response = detailResponse();
         when(submissionService.resubmit(eq(1L), eq(8L), any(), any())).thenReturn(response);
         MockMultipartFile request = new MockMultipartFile("request", "request", "application/json",
-                "{\"textContent\":\"수정합니다.\"}".getBytes());
+                "{\"textContent\":\"수정합니다.\"}".getBytes(StandardCharsets.UTF_8));
 
         mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", 1L)
                         .file(request)
@@ -132,7 +134,7 @@ class SubmissionControllerSecurityTest {
     @Test
     void unauthenticatedResubmitReturnsUnauthorized() throws Exception {
         MockMultipartFile request = new MockMultipartFile("request", "request", "application/json",
-                "{\"textContent\":\"수정합니다.\"}".getBytes());
+                "{\"textContent\":\"수정합니다.\"}".getBytes(StandardCharsets.UTF_8));
 
         mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", 1L)
                         .file(request))

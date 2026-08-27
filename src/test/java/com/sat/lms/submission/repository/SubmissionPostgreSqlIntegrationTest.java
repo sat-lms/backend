@@ -22,6 +22,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -410,7 +411,8 @@ class SubmissionPostgreSqlIntegrationTest {
 
     private MockMultipartFile jsonPart(String textContent) throws Exception {
         String body = textContent == null ? "{}" : "{\"textContent\":\"" + textContent + "\"}";
-        return new MockMultipartFile("request", "request", "application/json", body.getBytes());
+        return new MockMultipartFile("request", "request", "application/json",
+                body.getBytes(StandardCharsets.UTF_8));
     }
 
     private Long insertMember(String studentNumber, String name, String role) {
