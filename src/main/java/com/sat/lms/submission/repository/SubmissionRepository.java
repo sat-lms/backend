@@ -7,4 +7,5 @@ import java.util.Optional;
 
 public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     Optional<Submission> findByAssignmentIdAndStudentId(Long assignmentId, Long studentId);
+    boolean existsByAssignmentId(Long assignmentId);
 }
