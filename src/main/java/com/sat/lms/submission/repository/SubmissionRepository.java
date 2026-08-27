@@ -26,4 +26,5 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
             """)
     Page<SubmissionListResponse> findSubmissionPageByStudentId(@Param("studentId") Long studentId,
                                                                Pageable pageable);
+    boolean existsByAssignmentId(Long assignmentId);
 }
