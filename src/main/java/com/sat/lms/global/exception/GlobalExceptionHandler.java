@@ -5,6 +5,7 @@ import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.mapping.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -41,6 +42,11 @@ public class GlobalExceptionHandler {
             HandlerMethodValidationException.class})
     public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception e) {
         return ResponseEntity.badRequest().body(ApiResponse.fail(INVALID_INPUT_MESSAGE));
+    }
+
+    @ExceptionHandler(PropertyReferenceException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePropertyReferenceException(PropertyReferenceException e) {
+        return ResponseEntity.badRequest().body(ApiResponse.fail("정렬 기준으로 사용할 수 없는 필드입니다."));
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)

@@ -14,11 +14,17 @@ import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.submission.dto.SubmissionCreateRequest;
+import com.sat.lms.submission.dto.SubmissionFileResponse;
+import com.sat.lms.submission.dto.SubmissionListResponse;
 import com.sat.lms.submission.entity.Submission;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -337,6 +343,56 @@ class SubmissionServiceTest {
         assertThatThrownBy(() -> service.getMySubmission(1L, 3L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
+    @Test
+    void getMySubmissionsGroupsAttachmentsBySubmissionAndLeavesOthersEmpty() {
+        Member student = student(3L);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        SubmissionListResponse withFile = new SubmissionListResponse(10L, 1L, "과제1", "내용1", false,
+                OffsetDateTime.now(), OffsetDateTime.now());
+        SubmissionListResponse withoutFile = new SubmissionListResponse(20L, 2L, "과제2", "내용2", true,
+                OffsetDateTime.now(), OffsetDateTime.now());
+        Pageable pageable = PageRequest.of(0, 20);
+        Page<SubmissionListResponse> page = new PageImpl<>(List.of(withFile, withoutFile), pageable, 2);
+        when(submissionRepository.findSubmissionPageByStudentId(3L, pageable)).thenReturn(page);
+        Attachment attachmentEntity = attachment("a.txt", "submissions/10/a.txt");
+        SubmissionAttachment link = linkTo(10L, attachmentEntity);
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionIdIn(List.of(10L, 20L)))
+                .thenReturn(List.of(link));
+
+        Page<SubmissionListResponse> result = service.getMySubmissions(3L, pageable);
+
+        assertThat(result.getContent()).hasSize(2);
+        assertThat(result.getContent().get(0).getAttachments()).extracting(SubmissionFileResponse::getOriginalName)
+                .containsExactly("a.txt");
+        assertThat(result.getContent().get(1).getAttachments()).isEmpty();
+    }
+
+    @Test
+    void getMySubmissionsSkipsAttachmentQueryWhenPageIsEmpty() {
+        Member student = student(3L);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        Pageable pageable = PageRequest.of(0, 20);
+        when(submissionRepository.findSubmissionPageByStudentId(3L, pageable))
+                .thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        Page<SubmissionListResponse> result = service.getMySubmissions(3L, pageable);
+
+        assertThat(result.getContent()).isEmpty();
+        verify(submissionAttachmentRepository, never()).findWithAttachmentBySubmissionIdIn(any());
+    }
+
+    @Test
+    void getMySubmissionsForbiddenForAdmin() {
+        Member admin = mock(Member.class);
+        when(admin.getRole()).thenReturn(MemberRole.ADMIN);
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+
+        assertThatThrownBy(() -> service.getMySubmissions(7L, PageRequest.of(0, 20)))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
+        verify(submissionRepository, never()).findSubmissionPageByStudentId(any(), any());
     }
 
     @Test
@@ -746,6 +802,12 @@ class SubmissionServiceTest {
 
     private Attachment attachment(String originalName, String storageKey) {
         return Attachment.create(originalName, "stored-" + originalName, storageKey, "txt", 1L);
+    }
+
+    private SubmissionAttachment linkTo(Long submissionId, Attachment attachmentEntity) {
+        Submission submission = mock(Submission.class);
+        when(submission.getId()).thenReturn(submissionId);
+        return SubmissionAttachment.create(submission, attachmentEntity);
     }
 
     private MultipartFile multipartFile(String originalName, long size) {

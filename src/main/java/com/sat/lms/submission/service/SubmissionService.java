@@ -16,10 +16,14 @@ import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.submission.dto.SubmissionAttachmentDownloadUrlResponse;
 import com.sat.lms.submission.dto.SubmissionCreateRequest;
 import com.sat.lms.submission.dto.SubmissionDetailResponse;
+import com.sat.lms.submission.dto.SubmissionFileResponse;
+import com.sat.lms.submission.dto.SubmissionListResponse;
 import com.sat.lms.submission.entity.Submission;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,7 +36,9 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional(readOnly = true)
@@ -203,6 +209,26 @@ public class SubmissionService {
         submissionRepository.flush();
 
         deleteAfterCommit(storageKeys);
+    }
+
+    public Page<SubmissionListResponse> getMySubmissions(Long memberId, Pageable pageable) {
+        requireStudent(memberId);
+        Page<SubmissionListResponse> page = submissionRepository.findSubmissionPageByStudentId(memberId, pageable);
+        if (page.isEmpty()) {
+            return page;
+        }
+        List<Long> submissionIds = page.getContent().stream()
+                .map(SubmissionListResponse::getSubmissionId)
+                .toList();
+        Map<Long, List<SubmissionFileResponse>> attachmentsBySubmissionId = submissionAttachmentRepository
+                .findWithAttachmentBySubmissionIdIn(submissionIds).stream()
+                .collect(Collectors.groupingBy(
+                        link -> link.getSubmission().getId(),
+                        Collectors.mapping(link -> SubmissionFileResponse.from(link.getAttachment()),
+                                Collectors.toList())));
+        page.getContent().forEach(item ->
+                item.assignAttachments(attachmentsBySubmissionId.getOrDefault(item.getSubmissionId(), List.of())));
+        return page;
     }
 
     public SubmissionAttachmentDownloadUrlResponse getDownloadUrl(Long attachmentId, Long memberId) {
