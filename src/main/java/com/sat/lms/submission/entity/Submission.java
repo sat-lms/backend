@@ -57,6 +57,11 @@ public class Submission extends BaseEntity {
 
     public void updateTextContent(String textContent) { this.textContent = textContent; }
 
+    public void resubmit(String textContent, boolean late) {
+        this.textContent = textContent;
+        this.late = late;
+    }
+
     public Long getId() { return id; }
     public Assignment getAssignment() { return assignment; }
     public Member getStudent() { return student; }

@@ -9,9 +9,11 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -46,5 +48,23 @@ public class SubmissionController {
                                                          @AuthenticationPrincipal Long memberId) {
         return ApiResponse.success("과제를 제출했습니다.",
                 submissionService.submit(assignmentId, memberId, request, files));
+    }
+
+    @Operation(summary = "재제출 또는 전체 수정")
+    @PutMapping(consumes = "multipart/form-data")
+    public ApiResponse<SubmissionDetailResponse> resubmit(@PathVariable Long assignmentId,
+                                                          @RequestPart("request") SubmissionCreateRequest request,
+                                                          @RequestPart(value = "files", required = false)
+                                                          List<MultipartFile> files,
+                                                          @AuthenticationPrincipal Long memberId) {
+        return ApiResponse.success("제출물을 재제출했습니다.",
+                submissionService.resubmit(assignmentId, memberId, request, files));
+    }
+
+    @Operation(summary = "제출물 삭제")
+    @DeleteMapping
+    public ApiResponse<Void> delete(@PathVariable Long assignmentId, @AuthenticationPrincipal Long memberId) {
+        submissionService.deleteSubmission(assignmentId, memberId);
+        return ApiResponse.success("제출물을 삭제했습니다.", null);
     }
 }
