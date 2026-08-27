@@ -2,11 +2,13 @@ package com.sat.lms.assignment.repository;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sat.lms.assignment.service.AssignmentService;
 import com.sat.lms.global.security.JwtTokenProvider;
 import com.sat.lms.global.storage.FileStorage;
 import jakarta.persistence.EntityManagerFactory;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,14 +18,18 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.util.AopTestUtils;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -64,6 +70,8 @@ class AssignmentPostgreSqlIntegrationTest {
     @Autowired JwtTokenProvider jwtTokenProvider;
     @Autowired ObjectMapper objectMapper;
     @Autowired EntityManagerFactory entityManagerFactory;
+    @Autowired AssignmentService assignmentService;
+    @Autowired Clock applicationClock;
     @MockitoBean FileStorage fileStorage;
     AtomicInteger memberSequence = new AtomicInteger();
 
@@ -81,6 +89,40 @@ class AssignmentPostgreSqlIntegrationTest {
         jdbcTemplate.update("DELETE FROM member");
     }
 
+    @AfterEach
+    void restoreAssignmentClock() {
+        setAssignmentClock(applicationClock);
+    }
+
+    @Test
+    void localDateTimeIsStoredAndReadAsTheSameAsiaSeoulInstant() throws Exception {
+        setAssignmentClock(Clock.fixed(Instant.parse("2026-08-01T00:00:00Z"), ZoneOffset.UTC));
+        Long adminId = insertMember("ADMIN");
+        String responseBody = mockMvc.perform(post("/api/v1/assignments")
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN"))
+                        .contentType("application/json")
+                        .content("""
+                                {"title":"시간대 검증","content":"내용",
+                                 "dueAt":"2026-08-02T23:59:59","allowLateSubmission":false}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode response = objectMapper.readTree(responseBody);
+        long assignmentId = response.path("data").path("assignmentId").asLong();
+        Instant expectedInstant = Instant.parse("2026-08-02T14:59:59Z");
+        Object savedDueAt = jdbcTemplate.queryForObject(
+                "SELECT due_at FROM assignment WHERE id = ?", Object.class, assignmentId);
+        assertThat(toInstant(savedDueAt)).isEqualTo(expectedInstant);
+
+        String detailBody = mockMvc.perform(get("/api/v1/assignments/{id}", assignmentId)
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(OffsetDateTime.parse(objectMapper.readTree(detailBody).path("data").path("dueAt").asText())
+                .toInstant()).isEqualTo(expectedInstant);
+    }
+
     @Test
     void actualAssignmentCrudWorks() throws Exception {
         Long adminId = insertMember("ADMIN");
@@ -93,7 +135,7 @@ class AssignmentPostgreSqlIntegrationTest {
                         .contentType("application/json")
                         .content("""
                                 {"title":"과제 1","content":"과제 내용",
-                                 "dueAt":"2026-09-10T23:59:00+09:00","allowLateSubmission":true}
+                                 "dueAt":"2099-09-10T23:59:00","allowLateSubmission":true}
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.title").value("과제 1"))
@@ -111,7 +153,7 @@ class AssignmentPostgreSqlIntegrationTest {
         assertThat(saved.get("content")).isEqualTo("과제 내용");
         assertThat(saved.get("allow_late_submission")).isEqualTo(true);
         assertThat(toInstant(saved.get("due_at")))
-                .isEqualTo(OffsetDateTime.parse("2026-09-10T23:59:00+09:00").toInstant());
+                .isEqualTo(OffsetDateTime.parse("2099-09-10T23:59:00+09:00").toInstant());
         Instant originalCreatedAt = toInstant(saved.get("created_at"));
         Instant originalUpdatedAt = toInstant(saved.get("updated_at"));
 
@@ -149,7 +191,7 @@ class AssignmentPostgreSqlIntegrationTest {
         assertThat(updated.get("content")).isEqualTo("수정 내용");
         assertThat(updated.get("allow_late_submission")).isEqualTo(false);
         assertThat(toInstant(updated.get("due_at")))
-                .isEqualTo(OffsetDateTime.parse("2026-09-10T23:59:00+09:00").toInstant());
+                .isEqualTo(OffsetDateTime.parse("2099-09-10T23:59:00+09:00").toInstant());
         assertThat(toInstant(updated.get("created_at"))).isEqualTo(originalCreatedAt);
 
         mockMvc.perform(delete("/api/v1/assignments/{id}", assignmentId)
@@ -160,6 +202,46 @@ class AssignmentPostgreSqlIntegrationTest {
         mockMvc.perform(get("/api/v1/assignments/{id}", assignmentId)
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void pastDueAtReturnsBadRequestWithoutCreatingAssignmentRow() throws Exception {
+        Long adminId = insertMember("ADMIN");
+
+        mockMvc.perform(post("/api/v1/assignments")
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN"))
+                        .contentType("application/json")
+                        .content("""
+                                {"title":"과거 마감 과제","content":"내용",
+                                 "dueAt":"2000-01-01T00:00:00","allowLateSubmission":false}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("마감 시각은 현재보다 미래여야 합니다."));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM assignment", Long.class)).isZero();
+    }
+
+    @Test
+    void pastDueAtUpdateKeepsExistingRowAndUpdatedAt() throws Exception {
+        Long adminId = insertMember("ADMIN");
+        Long assignmentId = insertAssignment(adminId, "기존 과제", "2099-01-01T00:00:00Z",
+                "2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z");
+        Map<String, Object> before = jdbcTemplate.queryForMap(
+                "SELECT title, due_at, updated_at FROM assignment WHERE id = ?", assignmentId);
+
+        mockMvc.perform(patch("/api/v1/assignments/{id}", assignmentId)
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN"))
+                        .contentType("application/json")
+                        .content("{\"title\":\"변경 시도\",\"dueAt\":\"2000-01-01T00:00:00\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("마감 시각은 현재보다 미래여야 합니다."));
+
+        Map<String, Object> after = jdbcTemplate.queryForMap(
+                "SELECT title, due_at, updated_at FROM assignment WHERE id = ?", assignmentId);
+        assertThat(after.get("title")).isEqualTo(before.get("title"));
+        assertThat(toInstant(after.get("due_at"))).isEqualTo(toInstant(before.get("due_at")));
+        assertThat(toInstant(after.get("updated_at"))).isEqualTo(toInstant(before.get("updated_at")));
     }
 
     @Test
@@ -175,14 +257,14 @@ class AssignmentPostgreSqlIntegrationTest {
         mockMvc.perform(get("/api/v1/assignments?page=0&size=2")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[0].title").value("D"))
-                .andExpect(jsonPath("$.data.content[1].title").value("C"))
+                .andExpect(jsonPath("$.data.content[0].title").value("B"))
+                .andExpect(jsonPath("$.data.content[1].title").value("D"))
                 .andExpect(jsonPath("$.data.totalElements").value(4))
                 .andExpect(jsonPath("$.data.totalPages").value(2));
         mockMvc.perform(get("/api/v1/assignments?page=1&size=2")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[0].title").value("B"))
+                .andExpect(jsonPath("$.data.content[0].title").value("C"))
                 .andExpect(jsonPath("$.data.content[1].title").value("A"))
                 .andExpect(jsonPath("$.data.totalElements").value(4));
         mockMvc.perform(get("/api/v1/assignments?sort=dueAt,asc")
@@ -268,6 +350,11 @@ class AssignmentPostgreSqlIntegrationTest {
 
     private String token(Long memberId, String role) {
         return jwtTokenProvider.createAccessToken(memberId, role);
+    }
+
+    private void setAssignmentClock(Clock clock) {
+        Object target = AopTestUtils.getTargetObject(assignmentService);
+        ReflectionTestUtils.setField(target, "clock", clock);
     }
 
     private Instant toInstant(Object timestamp) {

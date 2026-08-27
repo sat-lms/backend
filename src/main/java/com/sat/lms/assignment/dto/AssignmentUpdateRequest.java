@@ -1,14 +1,17 @@
 package com.sat.lms.assignment.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.OptBoolean;
 
-import java.time.OffsetDateTime;
+import java.time.LocalDateTime;
 
 public class AssignmentUpdateRequest {
     private String title;
     private String content;
-    private OffsetDateTime dueAt;
+    @JsonFormat(pattern = "uuuu-MM-dd'T'HH:mm:ss", lenient = OptBoolean.FALSE)
+    private LocalDateTime dueAt;
     private Boolean allowLateSubmission;
     private boolean titlePresent;
     private boolean contentPresent;
@@ -20,7 +23,7 @@ public class AssignmentUpdateRequest {
     @JsonSetter("content")
     public void setContent(String content) { this.contentPresent = true; this.content = content; }
     @JsonSetter("dueAt")
-    public void setDueAt(OffsetDateTime dueAt) { this.dueAtPresent = true; this.dueAt = dueAt; }
+    public void setDueAt(LocalDateTime dueAt) { this.dueAtPresent = true; this.dueAt = dueAt; }
     @JsonSetter("allowLateSubmission")
     public void setAllowLateSubmission(Boolean allowLateSubmission) {
         this.allowLateSubmissionPresent = true;
@@ -29,7 +32,7 @@ public class AssignmentUpdateRequest {
 
     public String getTitle() { return title; }
     public String getContent() { return content; }
-    public OffsetDateTime getDueAt() { return dueAt; }
+    public LocalDateTime getDueAt() { return dueAt; }
     public Boolean getAllowLateSubmission() { return allowLateSubmission; }
     @JsonIgnore public boolean isTitlePresent() { return titlePresent; }
     @JsonIgnore public boolean isContentPresent() { return contentPresent; }

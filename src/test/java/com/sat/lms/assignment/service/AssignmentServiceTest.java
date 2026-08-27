@@ -16,7 +16,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,6 +32,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AssignmentServiceTest {
+    private static final Instant NOW = Instant.parse("2026-08-27T12:00:00Z");
     AssignmentRepository assignmentRepository;
     SubmissionRepository submissionRepository;
     MemberRepository memberRepository;
@@ -38,14 +43,15 @@ class AssignmentServiceTest {
         assignmentRepository = mock(AssignmentRepository.class);
         submissionRepository = mock(SubmissionRepository.class);
         memberRepository = mock(MemberRepository.class);
-        service = new AssignmentService(assignmentRepository, submissionRepository, memberRepository);
+        service = new AssignmentService(assignmentRepository, submissionRepository, memberRepository,
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
     void adminCreatesAssignment() {
         Member admin = member(MemberRole.ADMIN);
         AssignmentCreateRequest request = mock(AssignmentCreateRequest.class);
-        OffsetDateTime dueAt = OffsetDateTime.parse("2026-09-01T00:00:00Z");
+        LocalDateTime dueAt = LocalDateTime.parse("2026-09-01T00:00:00");
         when(request.getTitle()).thenReturn(" 과제 ");
         when(request.getContent()).thenReturn(" 내용 ");
         when(request.getDueAt()).thenReturn(dueAt);
@@ -60,8 +66,33 @@ class AssignmentServiceTest {
         assertThat(captor.getValue().getAdmin()).isSameAs(admin);
         assertThat(captor.getValue().getTitle()).isEqualTo("과제");
         assertThat(captor.getValue().getContent()).isEqualTo("내용");
-        assertThat(captor.getValue().getDueAt()).isEqualTo(dueAt);
+        assertThat(captor.getValue().getDueAt()).isEqualTo(OffsetDateTime.parse("2026-09-01T00:00:00+09:00"));
         assertThat(captor.getValue().isAllowLateSubmission()).isTrue();
+    }
+
+    @Test
+    void futureDueAtIsSaved() {
+        AssignmentCreateRequest request = createRequest(LocalDateTime.parse("2026-08-27T21:00:01"));
+        Member admin = member(MemberRole.ADMIN);
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(assignmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.create(request, 7L);
+
+        ArgumentCaptor<Assignment> captor = ArgumentCaptor.forClass(Assignment.class);
+        verify(assignmentRepository).save(captor.capture());
+        assertThat(captor.getValue().getDueAt()).isEqualTo(OffsetDateTime.parse("2026-08-27T21:00:01+09:00"));
+        assertThat(captor.getValue().getDueAt().toInstant()).isEqualTo(Instant.parse("2026-08-27T12:00:01Z"));
+    }
+
+    @Test
+    void pastDueAtIsRejectedWithoutSaving() {
+        assertInvalidCreateDueAt(LocalDateTime.parse("2026-08-27T20:59:59"));
+    }
+
+    @Test
+    void currentDueAtIsRejectedWithoutSaving() {
+        assertInvalidCreateDueAt(LocalDateTime.parse("2026-08-27T21:00:00"));
     }
 
     @Test
@@ -100,6 +131,12 @@ class AssignmentServiceTest {
             service.getAssignments(8L, 0, 20, field + ",desc");
         }
         service.getAssignments(8L, 0, 20, null);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(assignmentRepository, org.mockito.Mockito.times(5)).findAssignmentPage(captor.capture());
+        Pageable defaultPageable = captor.getAllValues().get(4);
+        assertThat(defaultPageable.getSort().getOrderFor("dueAt").isAscending()).isTrue();
+        assertThat(defaultPageable.getSort().getOrderFor("id").isAscending()).isTrue();
     }
 
     @Test
@@ -212,6 +249,71 @@ class AssignmentServiceTest {
         Member member = mock(Member.class);
         when(member.getRole()).thenReturn(role);
         return member;
+    }
+
+    @Test
+    void futureDueAtUpdateUsesAsiaSeoulAndFlushes() {
+        Member admin = member(MemberRole.ADMIN);
+        Assignment assignment = Assignment.create(admin, "제목", "내용",
+                OffsetDateTime.parse("2026-08-28T00:00:00+09:00"), true);
+        AssignmentUpdateRequest request = new AssignmentUpdateRequest();
+        request.setDueAt(LocalDateTime.parse("2026-08-29T23:59:59"));
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
+
+        service.update(1L, request, 7L);
+
+        assertThat(assignment.getDueAt()).isEqualTo(OffsetDateTime.parse("2026-08-29T23:59:59+09:00"));
+        assertThat(assignment.getDueAt().toInstant()).isEqualTo(Instant.parse("2026-08-29T14:59:59Z"));
+        verify(assignmentRepository).flush();
+    }
+
+    @Test
+    void currentOrPastDueAtUpdateDoesNotMutateAssignmentOrFlush() {
+        assertInvalidUpdateDueAt(LocalDateTime.parse("2026-08-27T21:00:00"));
+        assertInvalidUpdateDueAt(LocalDateTime.parse("2026-08-27T20:59:59"));
+    }
+
+    private AssignmentCreateRequest createRequest(LocalDateTime dueAt) {
+        AssignmentCreateRequest request = mock(AssignmentCreateRequest.class);
+        when(request.getTitle()).thenReturn("과제");
+        when(request.getContent()).thenReturn("내용");
+        when(request.getDueAt()).thenReturn(dueAt);
+        when(request.getAllowLateSubmission()).thenReturn(false);
+        return request;
+    }
+
+    private void assertInvalidCreateDueAt(LocalDateTime dueAt) {
+        Member admin = member(MemberRole.ADMIN);
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+
+        assertThatThrownBy(() -> service.create(createRequest(dueAt), 7L))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(exception.getMessage()).isEqualTo("마감 시각은 현재보다 미래여야 합니다.");
+                });
+        verify(assignmentRepository, never()).save(any());
+    }
+
+    private void assertInvalidUpdateDueAt(LocalDateTime dueAt) {
+        Member admin = member(MemberRole.ADMIN);
+        OffsetDateTime originalDueAt = OffsetDateTime.parse("2026-08-28T00:00:00+09:00");
+        Assignment assignment = Assignment.create(admin, "기존 제목", "기존 내용", originalDueAt, true);
+        AssignmentUpdateRequest request = new AssignmentUpdateRequest();
+        request.setTitle("변경 제목");
+        request.setDueAt(dueAt);
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
+
+        assertThatThrownBy(() -> service.update(1L, request, 7L))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(exception.getMessage()).isEqualTo("마감 시각은 현재보다 미래여야 합니다.");
+                });
+        assertThat(assignment.getTitle()).isEqualTo("기존 제목");
+        assertThat(assignment.getDueAt()).isEqualTo(originalDueAt);
+        verify(assignmentRepository, never()).save(any());
+        verify(assignmentRepository, never()).flush();
     }
 
     private void assertBadRequest(Runnable action) { assertStatus(action, HttpStatus.BAD_REQUEST); }

@@ -53,7 +53,7 @@ public class AssignmentController {
     public ApiResponse<PageResponse<AssignmentListResponse>> getAssignments(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) int size,
-            @RequestParam(defaultValue = "createdAt,desc") String sort,
+            @RequestParam(defaultValue = "dueAt,asc") String sort,
             @AuthenticationPrincipal Long memberId,
             HttpServletRequest httpRequest) {
         String[] sortValues = httpRequest.getParameterValues("sort");

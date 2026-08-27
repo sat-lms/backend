@@ -18,31 +18,40 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.Set;
 
 @Service
 @Transactional(readOnly = true)
 public class AssignmentService {
+    private static final ZoneId ASSIGNMENT_TIME_ZONE = ZoneId.of("Asia/Seoul");
     private static final Set<String> ALLOWED_SORT_FIELDS =
             Set.of("createdAt", "updatedAt", "dueAt", "title");
 
     private final AssignmentRepository assignmentRepository;
     private final SubmissionRepository submissionRepository;
     private final MemberRepository memberRepository;
+    private final Clock clock;
 
     public AssignmentService(AssignmentRepository assignmentRepository,
                              SubmissionRepository submissionRepository,
-                             MemberRepository memberRepository) {
+                             MemberRepository memberRepository,
+                             Clock clock) {
         this.assignmentRepository = assignmentRepository;
         this.submissionRepository = submissionRepository;
         this.memberRepository = memberRepository;
+        this.clock = clock;
     }
 
     @Transactional
     public AssignmentDetailResponse create(AssignmentCreateRequest request, Long memberId) {
         Member admin = requireAdmin(memberId);
+        OffsetDateTime dueAt = validateAndConvertDueAt(request.getDueAt(), "마감 시각은 필수입니다.");
         Assignment assignment = Assignment.create(admin, request.getTitle().trim(), request.getContent().trim(),
-                request.getDueAt(), request.getAllowLateSubmission());
+                dueAt, request.getAllowLateSubmission());
         return AssignmentDetailResponse.from(assignmentRepository.save(assignment));
     }
 
@@ -60,11 +69,14 @@ public class AssignmentService {
     public AssignmentDetailResponse update(Long assignmentId, AssignmentUpdateRequest request, Long memberId) {
         requireAdmin(memberId);
         validateUpdate(request);
+        OffsetDateTime dueAt = request.isDueAtPresent()
+                ? validateAndConvertDueAt(request.getDueAt(), "마감 시각은 null일 수 없습니다.")
+                : null;
         Assignment assignment = findAssignment(assignmentId);
         assignment.update(
                 request.isTitlePresent() ? request.getTitle().trim() : null,
                 request.isContentPresent() ? request.getContent().trim() : null,
-                request.isDueAtPresent() ? request.getDueAt() : null,
+                dueAt,
                 request.isAllowLateSubmissionPresent() ? request.getAllowLateSubmission() : null
         );
         assignmentRepository.flush();
@@ -83,7 +95,9 @@ public class AssignmentService {
     }
 
     private Sort parseSort(String value) {
-        if (value == null || value.isBlank()) return Sort.by(Sort.Direction.DESC, "createdAt");
+        if (value == null || value.isBlank()) {
+            return Sort.by(Sort.Direction.ASC, "dueAt").and(Sort.by(Sort.Direction.ASC, "id"));
+        }
         String[] parts = value.split(",", -1);
         if (parts.length > 2 || parts[0].isBlank() || !ALLOWED_SORT_FIELDS.contains(parts[0])) {
             throw invalidSort();
@@ -113,6 +127,17 @@ public class AssignmentService {
         if (request.isAllowLateSubmissionPresent() && request.getAllowLateSubmission() == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "지각 제출 허용 여부는 null일 수 없습니다.");
         }
+    }
+
+    private OffsetDateTime validateAndConvertDueAt(LocalDateTime dueAt, String nullMessage) {
+        if (dueAt == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, nullMessage);
+        }
+        OffsetDateTime convertedDueAt = dueAt.atZone(ASSIGNMENT_TIME_ZONE).toOffsetDateTime();
+        if (!convertedDueAt.toInstant().isAfter(clock.instant())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "마감 시각은 현재보다 미래여야 합니다.");
+        }
+        return convertedDueAt;
     }
 
     private Assignment findAssignment(Long assignmentId) {
