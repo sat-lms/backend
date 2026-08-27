@@ -19,6 +19,7 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
             from Submission s
             join s.assignment a
             where s.student.id = :studentId
+            order by s.createdAt desc, s.id desc
             """,
             countQuery = """
             select count(s.id) from Submission s where s.student.id = :studentId

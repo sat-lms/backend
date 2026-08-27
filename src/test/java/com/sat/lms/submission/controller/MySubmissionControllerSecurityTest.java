@@ -71,17 +71,17 @@ class MySubmissionControllerSecurityTest {
     }
 
     @Test
-    void sortAndPagingParametersArePassedThrough() throws Exception {
+    void pagingParametersArePassedThroughAndStraySortParamIsIgnored() throws Exception {
         authenticate("student", 8L, "STUDENT");
         Page<SubmissionListResponse> page = new PageImpl<>(List.of(), PageRequest.of(1, 5), 0);
-        when(submissionService.getMySubmissions(eq(8L), any())).thenReturn(page);
+        when(submissionService.getMySubmissions(eq(8L), eq(PageRequest.of(1, 5)))).thenReturn(page);
 
         mockMvc.perform(get("/api/v1/members/me/submissions")
                         .param("page", "1").param("size", "5").param("sort", "updatedAt,desc")
                         .header("Authorization", "Bearer student"))
                 .andExpect(status().isOk());
 
-        verify(submissionService).getMySubmissions(eq(8L), any());
+        verify(submissionService).getMySubmissions(eq(8L), eq(PageRequest.of(1, 5)));
     }
 
     private void authenticate(String token, Long memberId, String role) {

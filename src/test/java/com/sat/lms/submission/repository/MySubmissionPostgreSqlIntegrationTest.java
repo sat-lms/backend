@@ -1,5 +1,7 @@
 package com.sat.lms.submission.repository;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
 import com.sat.lms.global.security.JwtTokenProvider;
@@ -13,12 +15,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpMethod;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.multipart.MultipartFile;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -26,6 +30,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,6 +73,7 @@ class MySubmissionPostgreSqlIntegrationTest {
     @Autowired MockMvc mockMvc;
     @Autowired JwtTokenProvider jwtTokenProvider;
     @Autowired EntityManagerFactory entityManagerFactory;
+    @Autowired ObjectMapper objectMapper;
     @MockitoBean FileStorage fileStorage;
     private final AtomicInteger adminCounter = new AtomicInteger();
 
@@ -151,12 +158,11 @@ class MySubmissionPostgreSqlIntegrationTest {
         submitText(studentId, token, assignmentWithoutFileId, "텍스트만 제출");
 
         mockMvc.perform(get("/api/v1/members/me/submissions")
-                        .param("sort", "createdAt,asc")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[0].attachments.length()").value(1))
-                .andExpect(jsonPath("$.data.content[0].attachments[0].originalName").value("a.txt"))
-                .andExpect(jsonPath("$.data.content[1].attachments.length()").value(0));
+                .andExpect(jsonPath("$.data.content[0].attachments.length()").value(0))
+                .andExpect(jsonPath("$.data.content[1].attachments.length()").value(1))
+                .andExpect(jsonPath("$.data.content[1].attachments[0].originalName").value("a.txt"));
     }
 
     @Test
@@ -172,34 +178,53 @@ class MySubmissionPostgreSqlIntegrationTest {
     }
 
     @Test
-    void invalidSortFieldStillReturnsServerErrorUnaffectedByPropertyReferenceExceptionFix() throws Exception {
-        Long studentId = insertMember("student08", "학생", "STUDENT");
-        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
-
-        mockMvc.perform(get("/api/v1/members/me/submissions")
-                        .param("sort", "bogusField,asc")
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().is5xxServerError());
-    }
-
-    @Test
-    void sortByUpdatedAtDescendingOrdersResultsNewestFirst() throws Exception {
+    void resultsAreOrderedByCreatedAtDescendingByDefault() throws Exception {
         Long studentId = insertMember("student06", "학생", "STUDENT");
         String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
         Long assignmentOldId = insertAssignment("오래된과제");
         Long assignmentNewId = insertAssignment("최신과제");
         submitText(studentId, token, assignmentOldId, "오래된 제출");
         submitText(studentId, token, assignmentNewId, "최신 제출");
-        jdbcTemplate.update("UPDATE submission SET updated_at = now() - interval '1 day' "
-                + "WHERE assignment_id = ?", assignmentOldId);
-        jdbcTemplate.update("UPDATE submission SET updated_at = now() WHERE assignment_id = ?", assignmentNewId);
 
         mockMvc.perform(get("/api/v1/members/me/submissions")
-                        .param("sort", "updatedAt,desc")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content[0].textContent").value("최신 제출"))
                 .andExpect(jsonPath("$.data.content[1].textContent").value("오래된 제출"));
+    }
+
+    @Test
+    void resultOrderStaysDeterministicAcrossRepeatedRequestsAndResubmitEvenWithTiedTimestamps() throws Exception {
+        Long studentId = insertMember("student10", "학생", "STUDENT");
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        Long assignmentAId = insertAssignment("과제A");
+        Long assignmentBId = insertAssignment("과제B");
+        Long assignmentCId = insertAssignment("과제C");
+        submitText(studentId, token, assignmentAId, "A 제출");
+        submitText(studentId, token, assignmentBId, "B 제출");
+        submitText(studentId, token, assignmentCId, "C 제출");
+        jdbcTemplate.update(
+                "UPDATE submission SET created_at = '2026-01-01T00:00:00Z' WHERE student_id = ?", studentId);
+
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", assignmentBId)
+                        .file(jsonPart("B 재제출"))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        List<Long> expectedOrder = jdbcTemplate.queryForList(
+                "SELECT id FROM submission WHERE student_id = ? ORDER BY id DESC", Long.class, studentId);
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            MvcResult result = mockMvc.perform(get("/api/v1/members/me/submissions")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            JsonNode content = objectMapper.readTree(result.getResponse().getContentAsString())
+                    .get("data").get("content");
+            List<Long> actualOrder = new ArrayList<>();
+            content.forEach(node -> actualOrder.add(node.get("submissionId").asLong()));
+            assertThat(actualOrder).isEqualTo(expectedOrder);
+        }
     }
 
     @Test
