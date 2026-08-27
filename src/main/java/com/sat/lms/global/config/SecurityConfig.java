@@ -40,6 +40,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/submission-attachments/*").authenticated()
                         .requestMatchers("/api/v1/admin/member-applications/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/members/me").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/members/me/submissions").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint((request, response, exception) -> {
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
