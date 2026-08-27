@@ -33,8 +33,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -281,10 +283,30 @@ class SubmissionServiceTest {
         StoredFile stored = new StoredFile("a.txt", "uuidA.txt", "submissions/42/uuidA.txt", "txt", 1L);
         when(fileStorage.upload(file, "submissions/42")).thenReturn(stored);
         when(attachmentRepository.saveAll(any())).thenThrow(new DataIntegrityViolationException("boom"));
-        org.mockito.Mockito.doThrow(new RuntimeException("s3 unreachable")).when(fileStorage).delete(anyString());
+        doThrow(new RuntimeException("s3 unreachable")).when(fileStorage).delete(anyString());
 
         assertThatThrownBy(() -> service.submit(1L, 3L, request(null), List.of(file)))
                 .isInstanceOf(DataIntegrityViolationException.class);
+
+        verify(fileStorage, times(3)).delete("submissions/42/uuidA.txt");
+    }
+
+    @Test
+    void compensateRetriesS3DeleteAndSucceedsWithinAttemptBudget() {
+        givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
+        MultipartFile file = multipartFile("a.txt", 10);
+        StoredFile stored = new StoredFile("a.txt", "uuidA.txt", "submissions/42/uuidA.txt", "txt", 1L);
+        when(fileStorage.upload(file, "submissions/42")).thenReturn(stored);
+        when(attachmentRepository.saveAll(any())).thenThrow(new DataIntegrityViolationException("boom"));
+        doThrow(new RuntimeException("transient"))
+                .doThrow(new RuntimeException("transient"))
+                .doNothing()
+                .when(fileStorage).delete("submissions/42/uuidA.txt");
+
+        assertThatThrownBy(() -> service.submit(1L, 3L, request(null), List.of(file)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        verify(fileStorage, times(3)).delete("submissions/42/uuidA.txt");
     }
 
     @Test
@@ -433,6 +455,44 @@ class SubmissionServiceTest {
         verify(submissionRepository).delete(submission);
         verify(fileStorage).delete("submissions/5/a.txt");
         verify(fileStorage).delete("submissions/5/b.txt");
+    }
+
+    @Test
+    void deleteSubmissionRetriesS3DeleteAndSucceedsWithinAttemptBudget() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "text", false);
+        Attachment attachmentEntity = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, attachmentEntity);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(link));
+        doThrow(new RuntimeException("transient"))
+                .doThrow(new RuntimeException("transient"))
+                .doNothing()
+                .when(fileStorage).delete("submissions/5/a.txt");
+
+        service.deleteSubmission(1L, 3L);
+
+        verify(fileStorage, times(3)).delete("submissions/5/a.txt");
+    }
+
+    @Test
+    void deleteSubmissionGivesUpS3DeleteAfterMaxAttemptsWithoutFailingTheRequest() {
+        Member student = student(3L);
+        Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
+        Submission submission = existingSubmission(5L, student, assignment, "text", false);
+        Attachment attachmentEntity = attachment("a.txt", "submissions/5/a.txt");
+        SubmissionAttachment link = SubmissionAttachment.create(submission, attachmentEntity);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(link));
+        doThrow(new RuntimeException("permanent")).when(fileStorage).delete("submissions/5/a.txt");
+
+        service.deleteSubmission(1L, 3L);
+
+        verify(fileStorage, times(3)).delete("submissions/5/a.txt");
+        verify(submissionRepository).delete(submission);
     }
 
     @Test

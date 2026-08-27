@@ -39,6 +39,8 @@ import java.util.Set;
 public class SubmissionService {
     private static final Logger log = LoggerFactory.getLogger(SubmissionService.class);
     private static final int MAX_FILE_COUNT = 5;
+    private static final int MAX_DELETE_ATTEMPTS = 3;
+    private static final long DELETE_RETRY_DELAY_MILLIS = 100;
     private static final long MAX_FILE_SIZE_BYTES = 50L * 1024 * 1024;
     private static final long MAX_TOTAL_SIZE_BYTES = 100L * 1024 * 1024;
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
@@ -246,12 +248,7 @@ public class SubmissionService {
 
     private void compensate(List<StoredFile> uploaded) {
         for (StoredFile file : uploaded) {
-            try {
-                fileStorage.delete(file.storageKey());
-            } catch (RuntimeException e) {
-                log.error("Failed to delete orphaned S3 object after submission save failure: storageKey={}",
-                        file.storageKey(), e);
-            }
+            deleteWithRetry(file.storageKey());
         }
     }
 
@@ -273,11 +270,38 @@ public class SubmissionService {
 
     private void deleteQuietly(List<String> storageKeys) {
         for (String key : storageKeys) {
+            deleteWithRetry(key);
+        }
+    }
+
+    private void deleteWithRetry(String storageKey) {
+        for (int attempt = 1; attempt <= MAX_DELETE_ATTEMPTS; attempt++) {
             try {
-                fileStorage.delete(key);
+                fileStorage.delete(storageKey);
+                return;
             } catch (RuntimeException e) {
-                log.error("Failed to delete replaced/removed S3 object: storageKey={}", key, e);
+                if (attempt == MAX_DELETE_ATTEMPTS) {
+                    log.error("Giving up deleting S3 object after {} attempts: storageKey={}",
+                            MAX_DELETE_ATTEMPTS, storageKey, e);
+                    return;
+                }
+                log.warn("Retrying S3 object delete (attempt {}/{}): storageKey={}",
+                        attempt, MAX_DELETE_ATTEMPTS, storageKey, e);
+                if (!sleepBeforeRetry(storageKey)) {
+                    return;
+                }
             }
+        }
+    }
+
+    private boolean sleepBeforeRetry(String storageKey) {
+        try {
+            Thread.sleep(DELETE_RETRY_DELAY_MILLIS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while waiting to retry S3 delete: storageKey={}", storageKey, e);
+            return false;
         }
     }
 
