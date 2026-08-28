@@ -23,6 +23,9 @@ import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.submission.entity.Submission;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.junit.jupiter.api.BeforeEach;
@@ -77,6 +80,7 @@ import static org.hamcrest.Matchers.endsWith;
 @AutoConfigureMockMvc
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
+        "spring.jpa.properties.hibernate.generate_statistics=true",
         "spring.flyway.enabled=true",
         "spring.flyway.locations=classpath:db/migration",
         "jwt.secret=test-secret-key-must-be-at-least-32-bytes"
@@ -103,6 +107,7 @@ class NoticePostgreSqlIntegrationTest {
     @Autowired NoticeReadRepository noticeReadRepository;
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired EntityManager entityManager;
+    @Autowired EntityManagerFactory entityManagerFactory;
     @Autowired AuthService authService;
     @Autowired MemberReviewService memberReviewService;
     @Autowired NoticeService noticeService;
@@ -469,9 +474,59 @@ class NoticePostgreSqlIntegrationTest {
                 .andExpect(jsonPath("$.data.noticeId").value(noticeId))
                 .andExpect(jsonPath("$.data.authorName").value("API관리자"))
                 .andExpect(jsonPath("$.data.isRead").value(true))
+                .andExpect(jsonPath("$.data.attachments.length()").value(0))
                 .andExpect(jsonPath("$.data.createdAt", endsWith("Z")))
                 .andExpect(jsonPath("$.data.updatedAt", endsWith("Z")));
         assertThat(noticeReadRepository.existsByNoticeIdAndMemberId(noticeId, studentId)).isTrue();
+    }
+
+    @Test
+    void noticeDetailReturnsOnlyConnectedAttachmentsInStableOrderWithConstantQueries() throws Exception {
+        Long adminId = insertMember("dtAdmin", "상세관리자", "ADMIN");
+        Long studentId = insertMember("dtStudent", "상세학생", "STUDENT");
+        Long noticeId = insertNotice(adminId, "첨부 상세", false, OffsetDateTime.now(ZoneOffset.UTC));
+        Long otherNoticeId = insertNotice(adminId, "다른 공지", false, OffsetDateTime.now(ZoneOffset.UTC));
+        Long emptyNoticeId = insertNotice(adminId, "첨부 없는 공지", false, OffsetDateTime.now(ZoneOffset.UTC));
+        Long secondAttachmentId = insertAttachment("notices/" + noticeId + "/b.pdf");
+        Long firstAttachmentId = insertAttachment("notices/" + noticeId + "/a.pdf");
+        Long otherAttachmentId = insertAttachment("notices/" + otherNoticeId + "/other.pdf");
+        jdbcTemplate.update("UPDATE attachment SET original_name = '둘.pdf', extension = 'pdf', size_kb = 2048 WHERE id = ?",
+                secondAttachmentId);
+        jdbcTemplate.update("UPDATE attachment SET original_name = '첫.HWPX', extension = 'hwpx', size_kb = 2 WHERE id = ?",
+                firstAttachmentId);
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?), (?, ?), (?, ?)",
+                noticeId, secondAttachmentId, noticeId, firstAttachmentId, otherNoticeId, otherAttachmentId);
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        mockMvc.perform(get("/api/v1/notices/{noticeId}", noticeId)
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(studentId, "STUDENT")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachments.length()").value(2))
+                .andExpect(jsonPath("$.data.attachments[0].attachmentId").value(secondAttachmentId))
+                .andExpect(jsonPath("$.data.attachments[0].formattedSize").value("2.0 MB"))
+                .andExpect(jsonPath("$.data.attachments[1].attachmentId").value(firstAttachmentId))
+                .andExpect(jsonPath("$.data.attachments[1].formattedSize").value("2 KB"))
+                .andExpect(jsonPath("$.data.attachments[0].storageKey").doesNotExist())
+                .andExpect(jsonPath("$.data.attachments[0].storedName").doesNotExist())
+                .andExpect(jsonPath("$.data.attachments[0].downloadUrl").doesNotExist());
+
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(4L);
+
+        statistics.clear();
+        mockMvc.perform(get("/api/v1/notices/{noticeId}", emptyNoticeId)
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(studentId, "STUDENT")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachments.length()").value(0));
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(4L);
+
+        mockMvc.perform(get("/api/v1/notices/{noticeId}", noticeId)
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(adminId, "ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachments.length()").value(2));
     }
 
     @Test
