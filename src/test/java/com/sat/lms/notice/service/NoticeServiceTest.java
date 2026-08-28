@@ -33,6 +33,7 @@ class NoticeServiceTest {
     NoticeRepository noticeRepository;
     NoticeReadRepository noticeReadRepository;
     MemberRepository memberRepository;
+    NoticeAttachmentCleanup attachmentCleanup;
     NoticeService service;
 
     @BeforeEach
@@ -40,7 +41,8 @@ class NoticeServiceTest {
         noticeRepository = mock(NoticeRepository.class);
         noticeReadRepository = mock(NoticeReadRepository.class);
         memberRepository = mock(MemberRepository.class);
-        service = new NoticeService(noticeRepository, noticeReadRepository, memberRepository);
+        attachmentCleanup = mock(NoticeAttachmentCleanup.class);
+        service = new NoticeService(noticeRepository, noticeReadRepository, memberRepository, attachmentCleanup);
     }
 
     @Test
@@ -174,7 +176,7 @@ class NoticeServiceTest {
         Member admin = admin();
         when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
         when(noticeRepository.findWithAdminById(99L)).thenReturn(Optional.empty());
-        when(noticeRepository.findById(99L)).thenReturn(Optional.empty());
+        when(noticeRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
         NoticeUpdateRequest request = new NoticeUpdateRequest();
         request.setTitle("제목");
 
@@ -196,6 +198,21 @@ class NoticeServiceTest {
         ArgumentCaptor<Notice> captor = ArgumentCaptor.forClass(Notice.class);
         verify(noticeRepository).save(captor.capture());
         assertThat(captor.getValue().getAdmin()).isSameAs(admin);
+    }
+
+    @Test
+    void deleteLocksNoticeCleansAttachmentsAndFlushesNoticeDeletion() {
+        Member admin = admin();
+        Notice notice = notice();
+        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(noticeRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(notice));
+
+        service.delete(1L, 7L);
+
+        verify(noticeRepository).findByIdForUpdate(1L);
+        verify(attachmentCleanup).deleteAllForNotice(1L);
+        verify(noticeRepository).delete(notice);
+        verify(noticeRepository).flush();
     }
 
     private Notice notice() {

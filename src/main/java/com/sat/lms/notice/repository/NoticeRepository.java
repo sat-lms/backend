@@ -2,10 +2,12 @@ package com.sat.lms.notice.repository;
 
 import com.sat.lms.notice.dto.NoticeListResponse;
 import com.sat.lms.notice.entity.Notice;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -43,4 +45,8 @@ public interface NoticeRepository extends JpaRepository<Notice, Long> {
     @EntityGraph(attributePaths = "admin")
     @Query("select n from Notice n where n.id = :id")
     Optional<Notice> findWithAdminById(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select n from Notice n where n.id = :id")
+    Optional<Notice> findByIdForUpdate(@Param("id") Long id);
 }
