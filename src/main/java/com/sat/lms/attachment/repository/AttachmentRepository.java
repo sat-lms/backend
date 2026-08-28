@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
+import java.util.List;
 
 public interface AttachmentRepository extends JpaRepository<Attachment, Long> {
     @Query("select count(aa.id) > 0 from AssignmentAttachment aa where aa.attachment.id = :attachmentId")
@@ -19,4 +20,8 @@ public interface AttachmentRepository extends JpaRepository<Attachment, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from Attachment a where a.id = :attachmentId")
     Optional<Attachment> findByIdForUpdate(@Param("attachmentId") Long attachmentId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from Attachment a where a.id in :attachmentIds order by a.id")
+    List<Attachment> findAllByIdForUpdate(@Param("attachmentIds") List<Long> attachmentIds);
 }

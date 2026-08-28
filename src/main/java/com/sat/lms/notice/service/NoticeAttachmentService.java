@@ -15,8 +15,6 @@ import com.sat.lms.notice.dto.NoticeAttachmentDownloadUrlResponse;
 import com.sat.lms.notice.dto.NoticeAttachmentResponse;
 import com.sat.lms.notice.entity.Notice;
 import com.sat.lms.notice.repository.NoticeRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,10 +30,7 @@ import java.util.Set;
 @Service
 @Transactional(readOnly = true)
 public class NoticeAttachmentService {
-    private static final Logger log = LoggerFactory.getLogger(NoticeAttachmentService.class);
     private static final int MAX_FILE_COUNT = 3;
-    private static final int MAX_DELETE_ATTEMPTS = 3;
-    private static final long DELETE_RETRY_DELAY_MILLIS = 100;
     private static final long MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024;
     private static final long MAX_TOTAL_SIZE_BYTES = 50L * 1024 * 1024;
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
@@ -49,26 +44,35 @@ public class NoticeAttachmentService {
     private final MemberRepository memberRepository;
     private final FileStorage fileStorage;
     private final AwsProperties awsProperties;
+    private final NoticeAttachmentCleanup cleanup;
 
     public NoticeAttachmentService(NoticeRepository noticeRepository,
                                    NoticeAttachmentRepository noticeAttachmentRepository,
                                    AttachmentRepository attachmentRepository,
                                    MemberRepository memberRepository,
                                    FileStorage fileStorage,
-                                   AwsProperties awsProperties) {
+                                   AwsProperties awsProperties,
+                                   NoticeAttachmentCleanup cleanup) {
         this.noticeRepository = noticeRepository;
         this.noticeAttachmentRepository = noticeAttachmentRepository;
         this.attachmentRepository = attachmentRepository;
         this.memberRepository = memberRepository;
         this.fileStorage = fileStorage;
         this.awsProperties = awsProperties;
+        this.cleanup = cleanup;
     }
 
     @Transactional
     public List<NoticeAttachmentResponse> upload(Long noticeId, List<MultipartFile> files, Long memberId) {
         requireAdmin(memberId);
-        Notice notice = noticeRepository.findById(noticeId)
+        validateFileListPresent(files);
+        Notice notice = noticeRepository.findByIdForUpdate(noticeId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 공지사항입니다."));
+        long existingCount = noticeAttachmentRepository.countByNoticeId(noticeId);
+        if (existingCount + files.size() > MAX_FILE_COUNT) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST,
+                    "공지 첨부파일은 최대 3개까지 등록할 수 있습니다.");
+        }
         validateFiles(files);
 
         List<StoredFile> uploaded = uploadAll(files, "notices/" + noticeId);
@@ -87,7 +91,7 @@ public class NoticeAttachmentService {
             noticeAttachmentRepository.flush();
             return attachments.stream().map(NoticeAttachmentResponse::from).toList();
         } catch (RuntimeException exception) {
-            if (!rollbackCompensationRegistered) compensate(uploaded);
+            if (!rollbackCompensationRegistered) cleanup.compensate(uploaded);
             throw exception;
         }
     }
@@ -104,20 +108,7 @@ public class NoticeAttachmentService {
     @Transactional
     public void delete(Long attachmentId, Long memberId) {
         requireAdmin(memberId);
-        NoticeAttachment link = findNoticeAttachment(attachmentId);
-        Attachment attachment = attachmentRepository.findByIdForUpdate(attachmentId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_ATTACHMENT_MESSAGE));
-        boolean shared = noticeAttachmentRepository.countByAttachmentId(attachmentId) > 1
-                || attachmentRepository.existsAssignmentLink(attachmentId)
-                || attachmentRepository.existsSubmissionLink(attachmentId);
-
-        noticeAttachmentRepository.delete(link);
-        noticeAttachmentRepository.flush();
-        if (!shared) {
-            attachmentRepository.delete(attachment);
-            attachmentRepository.flush();
-            deleteAfterCommit(attachment.getStorageKey());
-        }
+        cleanup.deleteOne(attachmentId);
     }
 
     private List<StoredFile> uploadAll(List<MultipartFile> files, String directory) {
@@ -126,74 +117,32 @@ public class NoticeAttachmentService {
             for (MultipartFile file : files) uploaded.add(fileStorage.upload(file, directory));
             return uploaded;
         } catch (RuntimeException exception) {
-            compensate(uploaded);
+            cleanup.compensate(uploaded);
             throw exception;
         }
     }
 
     private boolean registerRollbackCompensation(List<StoredFile> uploaded) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) return false;
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return false;
+        }
         List<StoredFile> requestFiles = List.copyOf(uploaded);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
-                if (status != TransactionSynchronization.STATUS_COMMITTED) compensate(requestFiles);
+                if (status != STATUS_COMMITTED) cleanup.compensate(requestFiles);
             }
         });
         return true;
     }
 
-    private void deleteAfterCommit(String storageKey) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    deleteWithRetry(storageKey);
-                }
-            });
-        } else {
-            deleteWithRetry(storageKey);
-        }
-    }
-
-    private void compensate(List<StoredFile> uploaded) {
-        for (StoredFile stored : uploaded) deleteWithRetry(stored.storageKey());
-    }
-
-    private void deleteWithRetry(String storageKey) {
-        for (int attempt = 1; attempt <= MAX_DELETE_ATTEMPTS; attempt++) {
-            try {
-                fileStorage.delete(storageKey);
-                return;
-            } catch (RuntimeException exception) {
-                if (attempt == MAX_DELETE_ATTEMPTS) {
-                    log.error("S3 object cleanup failed after {} attempts", MAX_DELETE_ATTEMPTS);
-                    return;
-                }
-                log.warn("Retrying S3 object cleanup (attempt {}/{})", attempt, MAX_DELETE_ATTEMPTS);
-                if (!sleepBeforeRetry()) return;
-            }
-        }
-    }
-
-    private boolean sleepBeforeRetry() {
-        try {
-            Thread.sleep(DELETE_RETRY_DELAY_MILLIS);
-            return true;
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            log.warn("Interrupted while waiting to retry S3 object cleanup");
-            return false;
+    private void validateFileListPresent(List<MultipartFile> files) {
+        if (files == null || files.isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "첨부할 파일을 입력해주세요.");
         }
     }
 
     private void validateFiles(List<MultipartFile> files) {
-        if (files == null || files.isEmpty()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "첨부할 파일을 입력해주세요.");
-        }
-        if (files.size() > MAX_FILE_COUNT) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "파일은 최대 3개까지 첨부할 수 있습니다.");
-        }
         long totalSize = 0;
         for (MultipartFile file : files) {
             validateFile(file);

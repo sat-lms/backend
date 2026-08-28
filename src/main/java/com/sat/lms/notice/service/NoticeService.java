@@ -29,12 +29,14 @@ public class NoticeService {
     private final NoticeRepository noticeRepository;
     private final NoticeReadRepository noticeReadRepository;
     private final MemberRepository memberRepository;
+    private final NoticeAttachmentCleanup attachmentCleanup;
 
     public NoticeService(NoticeRepository noticeRepository, NoticeReadRepository noticeReadRepository,
-                         MemberRepository memberRepository) {
+                         MemberRepository memberRepository, NoticeAttachmentCleanup attachmentCleanup) {
         this.noticeRepository = noticeRepository;
         this.noticeReadRepository = noticeReadRepository;
         this.memberRepository = memberRepository;
+        this.attachmentCleanup = attachmentCleanup;
     }
 
     public Page<NoticeListResponse> getNotices(Long memberId, boolean unreadOnly, Pageable pageable) {
@@ -78,9 +80,11 @@ public class NoticeService {
     @Transactional
     public void delete(Long noticeId, Long memberId) {
         requireAdmin(memberId);
-        Notice notice = noticeRepository.findById(noticeId)
+        Notice notice = noticeRepository.findByIdForUpdate(noticeId)
                 .orElseThrow(this::noticeNotFound);
+        attachmentCleanup.deleteAllForNotice(noticeId);
         noticeRepository.delete(notice);
+        noticeRepository.flush();
     }
 
     private void validateUpdate(NoticeUpdateRequest request) {

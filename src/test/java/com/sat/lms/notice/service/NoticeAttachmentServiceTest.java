@@ -45,6 +45,7 @@ class NoticeAttachmentServiceTest {
     AttachmentRepository attachmentRepository;
     MemberRepository memberRepository;
     FileStorage fileStorage;
+    NoticeAttachmentCleanup cleanup;
     NoticeAttachmentService service;
 
     @BeforeEach
@@ -54,10 +55,11 @@ class NoticeAttachmentServiceTest {
         attachmentRepository = mock(AttachmentRepository.class);
         memberRepository = mock(MemberRepository.class);
         fileStorage = mock(FileStorage.class);
+        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, fileStorage);
         AwsProperties properties = new AwsProperties();
         properties.getS3().setPresignedExpirationMinutes(5);
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage, properties);
+                attachmentRepository, memberRepository, fileStorage, properties, cleanup);
     }
 
     @AfterEach
@@ -100,6 +102,42 @@ class NoticeAttachmentServiceTest {
         verify(fileStorage, times(3)).upload(any(), anyString());
         verify(attachmentRepository, times(3)).save(any());
         verify(noticeAttachmentRepository, times(3)).save(any());
+        verify(noticeRepository).findByIdForUpdate(10L);
+    }
+
+    @Test
+    void cumulativeLimitAllowsOnePlusTwoAndTwoPlusOne() {
+        prepareAdminAndNotice();
+        when(attachmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(noticeAttachmentRepository.countByNoticeId(10L)).thenReturn(1L);
+        when(fileStorage.upload(any(), anyString())).thenReturn(
+                stored("a.pdf", "a.pdf", 1L), stored("b.pdf", "b.pdf", 1L));
+
+        assertThat(service.upload(10L, List.of(file("a.pdf", 1), file("b.pdf", 1)), 7L)).hasSize(2);
+
+        clearInvocations(fileStorage, attachmentRepository, noticeAttachmentRepository);
+        when(noticeAttachmentRepository.countByNoticeId(10L)).thenReturn(2L);
+        when(fileStorage.upload(any(), anyString())).thenReturn(stored("c.pdf", "c.pdf", 1L));
+        assertThat(service.upload(10L, List.of(file("c.pdf", 1)), 7L)).hasSize(1);
+    }
+
+    @Test
+    void cumulativeLimitRejectsTwoPlusTwoAndThreePlusOneBeforeStorageOrDatabase() {
+        prepareAdminAndNotice();
+        when(noticeAttachmentRepository.countByNoticeId(10L)).thenReturn(2L);
+
+        assertThatThrownBy(() -> service.upload(10L,
+                List.of(file("a.pdf", 1), file("b.pdf", 1)), 7L))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(exception.getMessage()).isEqualTo("공지 첨부파일은 최대 3개까지 등록할 수 있습니다.");
+                });
+
+        when(noticeAttachmentRepository.countByNoticeId(10L)).thenReturn(3L);
+        assertBadRequest(() -> service.upload(10L, List.of(file("c.pdf", 1)), 7L));
+        verify(fileStorage, never()).upload(any(), anyString());
+        verify(attachmentRepository, never()).save(any());
+        verify(noticeAttachmentRepository, never()).save(any());
     }
 
     @Test
@@ -131,7 +169,7 @@ class NoticeAttachmentServiceTest {
     @Test
     void missingNoticeReturnsNotFound() {
         stubMember(7L, MemberRole.ADMIN);
-        when(noticeRepository.findById(404L)).thenReturn(Optional.empty());
+        when(noticeRepository.findByIdForUpdate(404L)).thenReturn(Optional.empty());
 
         assertStatus(() -> service.upload(404L, List.of(file("a.pdf", 1)), 7L), HttpStatus.NOT_FOUND);
         verify(fileStorage, never()).upload(any(), anyString());
@@ -178,8 +216,9 @@ class NoticeAttachmentServiceTest {
         verify(fileStorage).delete("notices/10/a.pdf");
 
         reset(attachmentRepository, noticeAttachmentRepository);
+        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, fileStorage);
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage, properties());
+                attachmentRepository, memberRepository, fileStorage, properties(), cleanup);
         when(attachmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(noticeAttachmentRepository.save(any())).thenThrow(new RuntimeException("link db failed"));
         assertThatThrownBy(() -> service.upload(10L, List.of(file), 7L)).hasMessage("link db failed");
@@ -295,7 +334,7 @@ class NoticeAttachmentServiceTest {
     private void prepareAdminAndNotice() {
         stubMember(7L, MemberRole.ADMIN);
         Notice notice = mock(Notice.class);
-        when(noticeRepository.findById(10L)).thenReturn(Optional.of(notice));
+        when(noticeRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(notice));
     }
 
     private void prepareDelete(boolean shared) {
@@ -305,7 +344,7 @@ class NoticeAttachmentServiceTest {
         when(noticeAttachmentRepository.findWithNoticeAndAttachmentByAttachmentId(1L))
                 .thenReturn(Optional.of(link));
         when(attachmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(attachment));
-        when(noticeAttachmentRepository.countByAttachmentId(1L)).thenReturn(shared ? 2L : 1L);
+        when(noticeAttachmentRepository.countByAttachmentId(1L)).thenReturn(shared ? 1L : 0L);
         when(attachmentRepository.existsAssignmentLink(1L)).thenReturn(false);
         when(attachmentRepository.existsSubmissionLink(1L)).thenReturn(false);
     }

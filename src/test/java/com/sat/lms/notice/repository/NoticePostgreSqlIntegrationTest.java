@@ -609,6 +609,135 @@ class NoticePostgreSqlIntegrationTest {
         }
     }
 
+    @Test
+    void cumulativeAttachmentLimitRejectsTwoPlusTwoWithoutStorageOrRows() throws Exception {
+        Long adminId = insertMember("admin14", "누적관리자", "ADMIN");
+        Long noticeId = insertNotice(adminId, "누적 제한", false, OffsetDateTime.now(ZoneOffset.UTC));
+        Long firstId = insertAttachment("notices/" + noticeId + "/existing-a.pdf");
+        Long secondId = insertAttachment("notices/" + noticeId + "/existing-b.pdf");
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?), (?, ?)",
+                noticeId, firstId, noticeId, secondId);
+
+        mockMvc.perform(multipart("/api/v1/notices/{noticeId}/attachments", noticeId)
+                        .file(multipartFile("new-a.pdf", "a")).file(multipartFile("new-b.pdf", "b"))
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(adminId, "ADMIN")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("공지 첨부파일은 최대 3개까지 등록할 수 있습니다."));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM notice_attachment WHERE notice_id = ?", Long.class, noticeId)).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isEqualTo(2L);
+        verify(fileStorage, never()).upload(any(), anyString());
+    }
+
+    @Test
+    void cumulativeAttachmentLimitAllowsTwoPlusOne() throws Exception {
+        Long adminId = insertMember("admin15", "누적성공관리자", "ADMIN");
+        Long noticeId = insertNotice(adminId, "누적 성공", false, OffsetDateTime.now(ZoneOffset.UTC));
+        Long firstId = insertAttachment("notices/" + noticeId + "/existing-a.pdf");
+        Long secondId = insertAttachment("notices/" + noticeId + "/existing-b.pdf");
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?), (?, ?)",
+                noticeId, firstId, noticeId, secondId);
+        String storedName = "44444444-4444-4444-4444-444444444444.pdf";
+        when(fileStorage.upload(any(), eq("notices/" + noticeId))).thenReturn(new StoredFile(
+                "new.pdf", storedName, "notices/" + noticeId + "/" + storedName, "pdf", 1L));
+
+        mockMvc.perform(multipart("/api/v1/notices/{noticeId}/attachments", noticeId)
+                        .file(multipartFile("new.pdf", "new"))
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(adminId, "ADMIN")))
+                .andExpect(status().isCreated());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM notice_attachment WHERE notice_id = ?", Long.class, noticeId)).isEqualTo(3L);
+    }
+
+    @Test
+    void deletingNoticeRemovesUnsharedMetadataAndStorageAfterCommit() throws Exception {
+        Long adminId = insertMember("admin16", "공지삭제관리자", "ADMIN");
+        Long noticeId = insertNotice(adminId, "첨부 공지 삭제", false, OffsetDateTime.now(ZoneOffset.UTC));
+        String firstKey = "notices/" + noticeId + "/a.pdf";
+        String secondKey = "notices/" + noticeId + "/b.pdf";
+        Long firstId = insertAttachment(firstKey);
+        Long secondId = insertAttachment(secondKey);
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?), (?, ?)",
+                noticeId, firstId, noticeId, secondId);
+
+        mockMvc.perform(delete("/api/v1/notices/{noticeId}", noticeId)
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(adminId, "ADMIN")))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM notice WHERE id = ?", Long.class, noticeId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM notice_attachment WHERE notice_id = ?", Long.class, noticeId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isZero();
+        verify(fileStorage).delete(firstKey);
+        verify(fileStorage).delete(secondKey);
+    }
+
+    @Test
+    void deletingNoticeKeepsAttachmentSharedWithAssignment() throws Exception {
+        Long adminId = insertMember("admin17", "공유삭제관리자", "ADMIN");
+        Long noticeId = insertNotice(adminId, "공유 첨부 공지", false, OffsetDateTime.now(ZoneOffset.UTC));
+        Long assignmentId = insertAssignment(adminId, "공유 과제");
+        String sharedKey = "notices/" + noticeId + "/shared.pdf";
+        Long attachmentId = insertAttachment(sharedKey);
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?)",
+                noticeId, attachmentId);
+        jdbcTemplate.update("INSERT INTO assignment_attachment (assignment_id, attachment_id) VALUES (?, ?)",
+                assignmentId, attachmentId);
+
+        mockMvc.perform(delete("/api/v1/notices/{noticeId}", noticeId)
+                        .header("Authorization", "Bearer "
+                                + jwtTokenProvider.createAccessToken(adminId, "ADMIN")))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment WHERE id = ?",
+                Long.class, attachmentId)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM assignment_attachment WHERE attachment_id = ?",
+                Long.class, attachmentId)).isEqualTo(1L);
+        verify(fileStorage, never()).delete(sharedKey);
+    }
+
+    @Test
+    void noticeDeleteDatabaseFailureRollsBackAllRowsAndKeepsStorage() throws Exception {
+        Long adminId = insertMember("admin18", "전체롤백관리자", "ADMIN");
+        Long noticeId = insertNotice(adminId, "전체 삭제 롤백", false, OffsetDateTime.now(ZoneOffset.UTC));
+        String storageKey = "notices/" + noticeId + "/rollback-all.pdf";
+        Long attachmentId = insertAttachment(storageKey);
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?)",
+                noticeId, attachmentId);
+        jdbcTemplate.execute("""
+                CREATE FUNCTION fail_full_notice_attachment_delete() RETURNS trigger AS $$
+                BEGIN RAISE EXCEPTION 'forced full delete failure'; END;
+                $$ LANGUAGE plpgsql
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER trg_fail_full_notice_attachment_delete
+                BEFORE DELETE ON notice_attachment
+                FOR EACH ROW EXECUTE FUNCTION fail_full_notice_attachment_delete()
+                """);
+        try {
+            mockMvc.perform(delete("/api/v1/notices/{noticeId}", noticeId)
+                            .header("Authorization", "Bearer "
+                                    + jwtTokenProvider.createAccessToken(adminId, "ADMIN")))
+                    .andExpect(status().is5xxServerError());
+
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM notice WHERE id = ?",
+                    Long.class, noticeId)).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM notice_attachment WHERE notice_id = ?",
+                    Long.class, noticeId)).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment WHERE id = ?",
+                    Long.class, attachmentId)).isEqualTo(1L);
+            verify(fileStorage, never()).delete(storageKey);
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_fail_full_notice_attachment_delete ON notice_attachment");
+            jdbcTemplate.execute("DROP FUNCTION IF EXISTS fail_full_notice_attachment_delete()");
+        }
+    }
+
     private MockMultipartFile multipartFile(String originalName, String content) {
         return new MockMultipartFile("files", originalName, "application/octet-stream",
                 content.getBytes(StandardCharsets.UTF_8));
