@@ -9,6 +9,7 @@ import com.sat.lms.notice.dto.UnreadCountResponse;
 import com.sat.lms.notice.entity.Notice;
 import com.sat.lms.notice.repository.NoticeReadRepository;
 import com.sat.lms.notice.repository.NoticeRepository;
+import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.repository.MemberRepository;
@@ -30,13 +31,16 @@ public class NoticeService {
     private final NoticeReadRepository noticeReadRepository;
     private final MemberRepository memberRepository;
     private final NoticeAttachmentCleanup attachmentCleanup;
+    private final NoticeAttachmentRepository noticeAttachmentRepository;
 
     public NoticeService(NoticeRepository noticeRepository, NoticeReadRepository noticeReadRepository,
-                         MemberRepository memberRepository, NoticeAttachmentCleanup attachmentCleanup) {
+                         MemberRepository memberRepository, NoticeAttachmentCleanup attachmentCleanup,
+                         NoticeAttachmentRepository noticeAttachmentRepository) {
         this.noticeRepository = noticeRepository;
         this.noticeReadRepository = noticeReadRepository;
         this.memberRepository = memberRepository;
         this.attachmentCleanup = attachmentCleanup;
+        this.noticeAttachmentRepository = noticeAttachmentRepository;
     }
 
     public Page<NoticeListResponse> getNotices(Long memberId, boolean unreadOnly, Pageable pageable) {
@@ -52,7 +56,8 @@ public class NoticeService {
         Notice notice = getNoticeWithAdmin(noticeId);
         requireMember(memberId);
         noticeReadRepository.insertIfAbsent(noticeId, memberId, OffsetDateTime.now(ZoneOffset.UTC));
-        return NoticeDetailResponse.from(notice, true);
+        return NoticeDetailResponse.from(notice, true,
+                noticeAttachmentRepository.findWithAttachmentByNoticeId(noticeId));
     }
 
     @Transactional
@@ -74,7 +79,8 @@ public class NoticeService {
         notice.update(title, content, pinned);
         noticeRepository.flush();
         boolean isRead = noticeReadRepository.existsByNoticeIdAndMemberId(noticeId, memberId);
-        return NoticeDetailResponse.from(notice, isRead);
+        return NoticeDetailResponse.from(notice, isRead,
+                noticeAttachmentRepository.findWithAttachmentByNoticeId(noticeId));
     }
 
     @Transactional

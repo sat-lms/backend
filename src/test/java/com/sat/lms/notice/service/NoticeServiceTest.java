@@ -10,6 +10,9 @@ import com.sat.lms.notice.dto.NoticeUpdateRequest;
 import com.sat.lms.notice.entity.Notice;
 import com.sat.lms.notice.repository.NoticeReadRepository;
 import com.sat.lms.notice.repository.NoticeRepository;
+import com.sat.lms.attachment.entity.Attachment;
+import com.sat.lms.attachment.entity.NoticeAttachment;
+import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -34,6 +37,7 @@ class NoticeServiceTest {
     NoticeReadRepository noticeReadRepository;
     MemberRepository memberRepository;
     NoticeAttachmentCleanup attachmentCleanup;
+    NoticeAttachmentRepository noticeAttachmentRepository;
     NoticeService service;
 
     @BeforeEach
@@ -42,7 +46,9 @@ class NoticeServiceTest {
         noticeReadRepository = mock(NoticeReadRepository.class);
         memberRepository = mock(MemberRepository.class);
         attachmentCleanup = mock(NoticeAttachmentCleanup.class);
-        service = new NoticeService(noticeRepository, noticeReadRepository, memberRepository, attachmentCleanup);
+        noticeAttachmentRepository = mock(NoticeAttachmentRepository.class);
+        service = new NoticeService(noticeRepository, noticeReadRepository, memberRepository,
+                attachmentCleanup, noticeAttachmentRepository);
     }
 
     @Test
@@ -85,6 +91,37 @@ class NoticeServiceTest {
 
         verify(noticeReadRepository, org.mockito.Mockito.times(2))
                 .insertIfAbsent(org.mockito.ArgumentMatchers.eq(1L), org.mockito.ArgumentMatchers.eq(3L), any());
+    }
+
+    @Test
+    void detailReturnsOnlyAttachmentsConnectedToNoticeInRepositoryOrder() {
+        Notice notice = notice();
+        when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(mock(Member.class)));
+        Attachment first = attachment(10L, "첫.pdf", "pdf", 2L);
+        Attachment second = attachment(20L, "둘.HWPX", "hwpx", 1024L);
+        NoticeAttachment firstLink = link(first);
+        NoticeAttachment secondLink = link(second);
+        when(noticeAttachmentRepository.findWithAttachmentByNoticeId(1L))
+                .thenReturn(List.of(firstLink, secondLink));
+
+        var response = service.getNotice(1L, 3L);
+
+        assertThat(response.getAttachments()).hasSize(2);
+        assertThat(response.getAttachments()).extracting("attachmentId").containsExactly(10L, 20L);
+        assertThat(response.getAttachments().get(0).getOriginalName()).isEqualTo("첫.pdf");
+        assertThat(response.getAttachments().get(0).getFormattedSize()).isEqualTo("2 KB");
+        assertThat(response.getAttachments().get(1).getFormattedSize()).isEqualTo("1.0 MB");
+        verify(noticeAttachmentRepository).findWithAttachmentByNoticeId(1L);
+    }
+
+    @Test
+    void detailWithoutAttachmentsReturnsEmptyArrayModel() {
+        Notice notice = notice();
+        when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(mock(Member.class)));
+
+        assertThat(service.getNotice(1L, 3L).getAttachments()).isEmpty();
     }
 
     @Test
@@ -217,6 +254,21 @@ class NoticeServiceTest {
 
     private Notice notice() {
         return Notice.create(admin(), "제목", "내용", false);
+    }
+
+    private Attachment attachment(Long id, String originalName, String extension, Long sizeKb) {
+        Attachment attachment = mock(Attachment.class);
+        when(attachment.getId()).thenReturn(id);
+        when(attachment.getOriginalName()).thenReturn(originalName);
+        when(attachment.getExtension()).thenReturn(extension);
+        when(attachment.getSizeKb()).thenReturn(sizeKb);
+        return attachment;
+    }
+
+    private NoticeAttachment link(Attachment attachment) {
+        NoticeAttachment link = mock(NoticeAttachment.class);
+        when(link.getAttachment()).thenReturn(attachment);
+        return link;
     }
 
     private Member admin() {
