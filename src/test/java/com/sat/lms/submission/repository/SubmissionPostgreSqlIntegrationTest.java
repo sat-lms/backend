@@ -3,6 +3,7 @@ package com.sat.lms.submission.repository;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
 import com.sat.lms.global.security.JwtTokenProvider;
+import com.sat.lms.global.storage.FileExtensionExtractor;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import org.junit.jupiter.api.BeforeEach;
@@ -87,7 +88,8 @@ class SubmissionPostgreSqlIntegrationTest {
             MultipartFile file = invocation.getArgument(0);
             String directory = invocation.getArgument(1);
             String storedName = "stub-" + file.getOriginalFilename();
-            return new StoredFile(file.getOriginalFilename(), storedName, directory + "/" + storedName, "txt", 1L);
+            return new StoredFile(file.getOriginalFilename(), storedName, directory + "/" + storedName,
+                    FileExtensionExtractor.extract(file.getOriginalFilename()), 1L);
         });
     }
 
@@ -97,7 +99,7 @@ class SubmissionPostgreSqlIntegrationTest {
         Long assignmentId = insertAssignment(OffsetDateTime.now().plusDays(1), false);
         String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
         MockMultipartFile request = jsonPart("Member 클래스를 구현했습니다.");
-        MockMultipartFile file = new MockMultipartFile("files", "Member.java", "text/plain", "code".getBytes());
+        MockMultipartFile file = new MockMultipartFile("files", "Member.JAVA", "text/plain", "code".getBytes());
 
         mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
                         .file(request).file(file)
@@ -105,10 +107,11 @@ class SubmissionPostgreSqlIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.textContent").value("Member 클래스를 구현했습니다."))
                 .andExpect(jsonPath("$.data.isLate").value(false))
-                .andExpect(jsonPath("$.data.files[0].originalName").value("Member.java"));
+                .andExpect(jsonPath("$.data.files[0].originalName").value("Member.JAVA"));
 
         assertThat(submissionRepository.findByAssignmentIdAndStudentId(assignmentId, studentId)).isPresent();
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT extension FROM attachment", String.class)).isEqualTo("java");
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM submission_attachment", Long.class))
                 .isEqualTo(1);
     }

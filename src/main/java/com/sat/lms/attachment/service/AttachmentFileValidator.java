@@ -1,12 +1,12 @@
 package com.sat.lms.attachment.service;
 
 import com.sat.lms.global.exception.BusinessException;
+import com.sat.lms.global.storage.FileExtensionExtractor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 @Component
@@ -37,12 +37,6 @@ public class AttachmentFileValidator {
         if (totalSize > MAX_TOTAL_SIZE_BYTES) throw totalSizeExceeded();
     }
 
-    public String extensionOf(String originalName) {
-        int lastDot = originalName.lastIndexOf('.');
-        if (lastDot < 1 || lastDot == originalName.length() - 1) return "";
-        return originalName.substring(lastDot + 1).toLowerCase(Locale.ROOT);
-    }
-
     private void validateFile(MultipartFile file) {
         if (file == null || file.isEmpty() || file.getSize() <= 0) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "빈 파일은 업로드할 수 없습니다.");
@@ -54,7 +48,7 @@ public class AttachmentFileValidator {
         if (!isSafeOriginalName(originalName)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "올바르지 않은 파일명입니다.");
         }
-        if (!ALLOWED_EXTENSIONS.contains(extensionOf(originalName))) {
+        if (!ALLOWED_EXTENSIONS.contains(FileExtensionExtractor.extract(originalName))) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "허용되지 않는 파일 확장자입니다.");
         }
     }

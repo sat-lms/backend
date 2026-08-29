@@ -116,7 +116,7 @@ class AssignmentAttachmentServiceTest {
         prepareAdminAndAssignment();
         assertBadRequest(() -> service.upload(10L, null, 7L));
         assertBadRequest(() -> service.upload(10L, List.of(), 7L));
-        for (String name : new String[]{"empty.pdf", "no-extension", "bad.exe", "../safe.pdf", "folder/safe.pdf"}) {
+        for (String name : new String[]{"empty.pdf", "no-extension", ".pdf", "bad.exe", "../safe.pdf", "folder/safe.pdf"}) {
             int size = name.equals("empty.pdf") ? 0 : 1;
             assertBadRequest(() -> service.upload(10L, List.of(file(name, size)), 7L));
         }
