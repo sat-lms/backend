@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Date;
 
@@ -17,15 +18,18 @@ public class JwtTokenProvider {
 
     private final SecretKey key;
     private final long expirationSeconds;
+    private final Clock clock;
 
     public JwtTokenProvider(
             @Value("${jwt.secret}") String secret,
-            @Value("${jwt.expiration-seconds:3600}") long expirationSeconds
+            @Value("${jwt.expiration-seconds:3600}") long expirationSeconds,
+            Clock clock
     ) {
         this.key = Keys.hmacShaKeyFor(
                 secret.getBytes(StandardCharsets.UTF_8)
         );
         this.expirationSeconds = expirationSeconds;
+        this.clock = clock;
     }
 
     /**
@@ -33,7 +37,7 @@ public class JwtTokenProvider {
      */
     public String createAccessToken(Long memberId, String role) {
 
-        Instant now = Instant.now();
+        Instant now = clock.instant();
 
         return Jwts.builder()
                 .subject(memberId.toString())
@@ -53,11 +57,7 @@ public class JwtTokenProvider {
     public boolean validateToken(String token) {
 
         try {
-
-            Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token);
+            parseClaims(token);
 
             return true;
 
@@ -97,8 +97,12 @@ public class JwtTokenProvider {
      * JWT Claims 조회
      */
     private Claims getClaims(String token) {
+        return parseClaims(token);
+    }
 
+    private Claims parseClaims(String token) {
         return Jwts.parser()
+                .clock(() -> Date.from(clock.instant()))
                 .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
