@@ -29,6 +29,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.OffsetDateTime;
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -150,7 +151,8 @@ class MySubmissionPostgreSqlIntegrationTest {
         String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
         Long assignmentWithFileId = insertAssignment("파일있는과제");
         Long assignmentWithoutFileId = insertAssignment("파일없는과제");
-        MockMultipartFile file = new MockMultipartFile("files", "a.txt", "text/plain", "a".getBytes());
+        MockMultipartFile file = new MockMultipartFile("files", "a.txt", "text/plain",
+                "a".getBytes(StandardCharsets.UTF_8));
         mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentWithFileId)
                         .file(jsonPart("파일 제출")).file(file)
                         .header("Authorization", "Bearer " + token))
@@ -232,7 +234,8 @@ class MySubmissionPostgreSqlIntegrationTest {
         Long studentId = insertMember("student07", "학생", "STUDENT");
         String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
         for (int i = 0; i < 5; i++) {
-            MockMultipartFile file = new MockMultipartFile("files", "f" + i + ".txt", "text/plain", "x".getBytes());
+            MockMultipartFile file = new MockMultipartFile("files", "f" + i + ".txt", "text/plain",
+                    "x".getBytes(StandardCharsets.UTF_8));
             mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", insertAssignment("과제" + i))
                             .file(jsonPart("제출" + i)).file(file)
                             .header("Authorization", "Bearer " + token))
@@ -260,7 +263,8 @@ class MySubmissionPostgreSqlIntegrationTest {
 
     private MockMultipartFile jsonPart(String textContent) {
         String body = textContent == null ? "{}" : "{\"textContent\":\"" + textContent + "\"}";
-        return new MockMultipartFile("request", "request", "application/json", body.getBytes());
+        return new MockMultipartFile("request", "request", "application/json",
+                body.getBytes(StandardCharsets.UTF_8));
     }
 
     private Long insertMember(String studentNumber, String name, String role) {

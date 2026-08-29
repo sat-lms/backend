@@ -12,6 +12,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.sat.lms.admin.service.MemberReviewService;
 import com.sat.lms.assignment.repository.AssignmentRepository;
 import com.sat.lms.attachment.repository.AttachmentRepository;
+import com.sat.lms.attachment.repository.AssignmentAttachmentRepository;
 import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
 import com.sat.lms.auth.service.AuthService;
@@ -45,6 +46,7 @@ class LmsApplicationTests {
 	@MockitoBean NoticeReadRepository noticeReadRepository;
 	@MockitoBean AssignmentRepository assignmentRepository;
 	@MockitoBean AttachmentRepository attachmentRepository;
+	@MockitoBean AssignmentAttachmentRepository assignmentAttachmentRepository;
 	@MockitoBean NoticeAttachmentRepository noticeAttachmentRepository;
 	@MockitoBean SubmissionAttachmentRepository submissionAttachmentRepository;
 	@MockitoBean SubmissionRepository submissionRepository;

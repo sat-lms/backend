@@ -4,6 +4,7 @@ import com.sat.lms.attachment.entity.Attachment;
 import com.sat.lms.attachment.entity.NoticeAttachment;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
+import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
 import com.sat.lms.global.storage.FileStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,7 +35,8 @@ class NoticeAttachmentCleanupTest {
         noticeAttachmentRepository = mock(NoticeAttachmentRepository.class);
         attachmentRepository = mock(AttachmentRepository.class);
         fileStorage = mock(FileStorage.class);
-        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, fileStorage);
+        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository,
+                new AttachmentStorageLifecycle(fileStorage));
     }
 
     @AfterEach

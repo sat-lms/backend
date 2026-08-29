@@ -26,6 +26,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.OffsetDateTime;
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -250,7 +251,8 @@ class AdminSubmissionPostgreSqlIntegrationTest {
         Long studentId = insertMember("std07", "학생칠", "STUDENT", "APPROVED");
         String studentToken = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
         Long assignmentId = insertAssignment(adminId);
-        MockMultipartFile file = new MockMultipartFile("files", "result.txt", "text/plain", "ok".getBytes());
+        MockMultipartFile file = new MockMultipartFile("files", "result.txt", "text/plain",
+                "ok".getBytes(StandardCharsets.UTF_8));
         mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/submission", assignmentId)
                         .file(jsonPart("제출 내용")).file(file)
                         .header("Authorization", "Bearer " + studentToken))
@@ -292,7 +294,8 @@ class AdminSubmissionPostgreSqlIntegrationTest {
 
     private MockMultipartFile jsonPart(String textContent) {
         String body = textContent == null ? "{}" : "{\"textContent\":\"" + textContent + "\"}";
-        return new MockMultipartFile("request", "request", "application/json", body.getBytes());
+        return new MockMultipartFile("request", "request", "application/json",
+                body.getBytes(StandardCharsets.UTF_8));
     }
 
     private Long insertMember(String studentNumber, String name, String role, String status) {
