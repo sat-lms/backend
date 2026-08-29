@@ -23,7 +23,7 @@ public class MemberApplicationResponse {
     @Schema(description = "가입 신청 일시", example = "2026-08-01T10:00:00+09:00")
     private final OffsetDateTime createdAt;
 
-    public MemberApplicationResponse(Long memberId, String studentNumber, String name, String status, OffsetDateTime createdAt) {
+    private MemberApplicationResponse(Long memberId, String studentNumber, String name, String status, OffsetDateTime createdAt) {
         this.memberId = memberId;
         this.studentNumber = studentNumber;
         this.name = name;

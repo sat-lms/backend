@@ -47,7 +47,7 @@ public class MemberReviewService {
 
         member.applyReviewResult(approved ? MemberStatus.APPROVED : MemberStatus.REJECTED);
 
-        return MemberReviewResponse.of(member, review);
+        return MemberReviewResponse.from(member, review);
     }
 
     private void validate(MemberReviewRequest request) {

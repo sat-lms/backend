@@ -13,6 +13,8 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.OffsetDateTime;
 
+// attachment 테이블(V6 마이그레이션)에는 updated_at 컬럼이 없어 BaseEntity를 상속하지 않습니다.
+// BaseEntity로 바꾸면 매핑된 updated_at 컬럼이 실제 스키마에 없어 검증 오류가 발생합니다.
 @Entity
 @Table(name = "attachment", uniqueConstraints =
         @UniqueConstraint(name = "uk_attachment_storage_key", columnNames = "storage_key"))

@@ -41,7 +41,7 @@ class AuthControllerSecurityTest {
                         .content("""
                                 {"studentNumber":"20231234","name":"최인준","password":"abc12345","passwordConfirm":"abc12345"}
                                 """))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.studentNumber").value("20231234"));
     }
 

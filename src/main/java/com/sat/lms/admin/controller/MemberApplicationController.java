@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Admin Member Application API", description = "회원 가입 신청 관리 API")
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/admin/member-applications")
 public class MemberApplicationController {
@@ -44,7 +45,6 @@ public class MemberApplicationController {
             summary = "가입 신청 목록 조회",
             description = "관리자가 회원 가입 신청 목록을 조회합니다. status 를 지정하지 않으면 승인 대기(PENDING) 상태를 신청일시 오름차순으로 조회합니다."
     )
-    @SecurityRequirement(name = "bearerAuth")
     @GetMapping
     public ApiResponse<PageResponse<MemberApplicationResponse>> getMemberApplications(
             @Parameter(description = "조회할 가입 신청 상태", example = "PENDING")
@@ -60,7 +60,6 @@ public class MemberApplicationController {
             summary = "가입 신청 승인/거절",
             description = "관리자가 가입 신청을 심사합니다. action=APPROVED 이면 승인, action=REJECTED 이면 rejectionReason 이 필수입니다."
     )
-    @SecurityRequirement(name = "bearerAuth")
     @PatchMapping("/{memberId}")
     public ApiResponse<MemberReviewResponse> reviewMemberApplication(
             @Parameter(description = "심사 대상 회원 ID", example = "1")

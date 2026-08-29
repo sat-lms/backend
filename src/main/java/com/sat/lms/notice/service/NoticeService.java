@@ -53,6 +53,8 @@ public class NoticeService {
         return new UnreadCountResponse(noticeRepository.countUnreadByMemberId(memberId));
     }
 
+    // 조회처럼 보이지만 insertIfAbsent()가 native INSERT를 실행하므로 쓰기 트랜잭션이 필요합니다.
+    // 이 클래스 기본값인 readOnly=true로 되돌리면 INSERT가 런타임에 실패합니다.
     @Transactional
     public NoticeDetailResponse getNotice(Long noticeId, Long memberId) {
         Notice notice = getNoticeWithAdmin(noticeId);
