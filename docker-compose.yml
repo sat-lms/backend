@@ -7,8 +7,11 @@ services:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - "5432:5432"
+    # 호스트에 포트를 노출하지 않습니다. app 컨테이너는 같은 Docker 네트워크에서
+    # postgres:5432로 접근하므로 호스트 포트가 필요 없고, Docker는 iptables를
+    # 직접 조작해 ufw 규칙을 우회할 수 있어 127.0.0.1 바인딩조차 SSH로 서버에
+    # 접근 가능한 사람에게는 열려 있는 것과 같습니다. DB 확인은 DEPLOYMENT.md의
+    # 안내대로 `docker exec -it team-postgres psql -U ... -d ...`를 사용하세요.
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -25,6 +28,10 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # .env의 DB_URL(localhost 기준)은 로컬에서 애플리케이션을 직접 실행할 때만
+      # 쓰입니다. 이 app 컨테이너 안에서는 localhost가 postgres가 아니라 이
+      # 컨테이너 자신을 가리키므로, 여기서는 항상 서비스명 postgres로 재구성해서
+      # 넘깁니다.
       DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME}
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}

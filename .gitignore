@@ -40,3 +40,9 @@ out/
 application.yaml
 application.yml
 !src/main/resources/application.yaml
+
+### Local-only Docker overrides ###
+# 팀 공용 docker-compose.yml은 postgres 포트를 노출하지 않습니다(보안).
+# 로컬 디버깅 시 postgres:5432에 호스트에서 직접 붙어야 하면 이 파일에
+# 개인 환경용 오버라이드를 작성하세요. docker compose가 자동으로 병합합니다.
+docker-compose.override.yml
