@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+  push:
+    branches:
+      - dev
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run tests
+        env:
+          # Testcontainers 기반 통합 테스트는 @DynamicPropertySource로 datasource를
+          # 직접 주입받으므로 이 값들이 실제로 쓰이지는 않지만, 앞으로 추가될 테스트가
+          # Spring Context를 로드할 때 DB_URL 등 필수 플레이스홀더(기본값 없음) 때문에
+          # 실패하지 않도록 더미 값을 넣어둡니다. 운영 값이 아닙니다.
+          DB_URL: jdbc:postgresql://localhost:5432/ci_dummy
+          DB_NAME: ci_dummy
+          DB_USERNAME: ci_dummy
+          DB_PASSWORD: ci_dummy
+          JWT_SECRET: ci-test-secret-key-must-be-at-least-32-bytes
+        run: ./gradlew test --no-daemon
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/reports/tests/test
+          retention-days: 7
