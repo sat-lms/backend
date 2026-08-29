@@ -11,10 +11,12 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Auth API", description = "회원가입 및 로그인 API")
 @RestController
+@RequestMapping("/api/v1/auth")
 public class AuthController {
 
     private final AuthService authService;
@@ -24,7 +26,7 @@ public class AuthController {
     }
 
     @Operation(summary = "회원가입 신청", description = "가입 직후 역할은 STUDENT, 상태는 PENDING입니다.")
-    @PostMapping("/api/v1/auth/signup")
+    @PostMapping("/signup")
     public ApiResponse<SignupResponse> signup(@Valid @RequestBody SignupRequest request) {
         return ApiResponse.success(
                 "회원가입 신청이 완료되었습니다. 운영자 승인 후 로그인할 수 있습니다.",
@@ -33,13 +35,13 @@ public class AuthController {
     }
 
     @Operation(summary = "로그인", description = "APPROVED 상태의 회원만 로그인 검증을 통과합니다. 인증 토큰은 아직 발급하지 않습니다.")
-    @PostMapping("/api/v1/auth/login")
+    @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.success("로그인에 성공했습니다.", authService.login(request));
     }
 
-    @Operation(summary = "로그아웃", description = "기존 로그아웃 엔드포인트입니다. 인증 시스템 연동 전에는 서버 상태를 변경하지 않습니다.")
-    @PostMapping("/api/auth/logout")
+    @Operation(summary = "로그아웃", description = "인증 시스템 연동 전에는 서버 상태를 변경하지 않습니다.")
+    @PostMapping("/logout")
     public ApiResponse<Void> logout() {
         return ApiResponse.success("로그아웃되었습니다.", null);
     }
