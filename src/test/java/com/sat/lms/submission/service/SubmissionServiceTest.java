@@ -6,8 +6,8 @@ import com.sat.lms.attachment.entity.Attachment;
 import com.sat.lms.attachment.entity.SubmissionAttachment;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
-import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.exception.BusinessException;
+import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
@@ -53,7 +53,6 @@ class SubmissionServiceTest {
     AttachmentRepository attachmentRepository;
     SubmissionAttachmentRepository submissionAttachmentRepository;
     FileStorage fileStorage;
-    AwsProperties awsProperties;
     SubmissionService service;
 
     @BeforeEach
@@ -64,10 +63,8 @@ class SubmissionServiceTest {
         attachmentRepository = mock(AttachmentRepository.class);
         submissionAttachmentRepository = mock(SubmissionAttachmentRepository.class);
         fileStorage = mock(FileStorage.class);
-        awsProperties = new AwsProperties();
-        awsProperties.getS3().setPresignedExpirationMinutes(5);
         service = new SubmissionService(submissionRepository, assignmentRepository, memberRepository,
-                attachmentRepository, submissionAttachmentRepository, fileStorage, awsProperties);
+                attachmentRepository, submissionAttachmentRepository, fileStorage);
 
         when(submissionRepository.save(any())).thenAnswer(invocation -> {
             Submission submission = invocation.getArgument(0);
@@ -573,12 +570,13 @@ class SubmissionServiceTest {
         when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
-        when(fileStorage.createDownloadUrl("submissions/5/a.txt")).thenReturn("https://example.com/signed");
+        when(fileStorage.createDownloadUrl("submissions/5/a.txt"))
+                .thenReturn(new DownloadUrl("https://example.com/signed", 347L));
 
         var response = service.getDownloadUrl(10L, 3L);
 
         assertThat(response.getDownloadUrl()).isEqualTo("https://example.com/signed");
-        assertThat(response.getExpiresIn()).isEqualTo(300L);
+        assertThat(response.getExpiresIn()).isEqualTo(347L);
         assertThat(response.getOriginalName()).isEqualTo("a.txt");
     }
 
@@ -595,7 +593,8 @@ class SubmissionServiceTest {
         when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
-        when(fileStorage.createDownloadUrl("submissions/5/a.txt")).thenReturn("https://example.com/signed");
+        when(fileStorage.createDownloadUrl("submissions/5/a.txt"))
+                .thenReturn(new DownloadUrl("https://example.com/signed", 347L));
 
         var response = service.getDownloadUrl(10L, 7L);
 
@@ -617,6 +616,7 @@ class SubmissionServiceTest {
         assertThatThrownBy(() -> service.getDownloadUrl(10L, 8L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
+        verify(fileStorage, never()).createDownloadUrl(anyString());
     }
 
     @Test
@@ -629,6 +629,7 @@ class SubmissionServiceTest {
         assertThatThrownBy(() -> service.getDownloadUrl(99L, 3L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
+        verify(fileStorage, never()).createDownloadUrl(anyString());
     }
 
     @Test

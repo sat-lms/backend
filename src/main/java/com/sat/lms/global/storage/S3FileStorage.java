@@ -92,7 +92,7 @@ public class S3FileStorage implements FileStorage {
     }
 
     @Override
-    public String createDownloadUrl(String storageKey) {
+    public DownloadUrl createDownloadUrl(String storageKey) {
         validateStorageKey(storageKey);
         long expirationMinutes = properties.getS3().getPresignedExpirationMinutes();
         if (expirationMinutes <= 0) {
@@ -103,11 +103,13 @@ public class S3FileStorage implements FileStorage {
                     .bucket(requireBucket())
                     .key(storageKey)
                     .build();
+            Duration expiration = Duration.ofMinutes(expirationMinutes);
             GetObjectPresignRequest request = GetObjectPresignRequest.builder()
-                    .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                    .signatureDuration(expiration)
                     .getObjectRequest(getObject)
                     .build();
-            return s3Presigner.presignGetObject(request).url().toString();
+            String url = s3Presigner.presignGetObject(request).url().toString();
+            return new DownloadUrl(url, expiration.toSeconds());
         } catch (SdkException e) {
             logSdkFailure("presign", e);
             throw storageFailure();

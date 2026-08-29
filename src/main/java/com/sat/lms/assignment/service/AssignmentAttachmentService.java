@@ -10,8 +10,8 @@ import com.sat.lms.attachment.repository.AssignmentAttachmentRepository;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.service.AttachmentFileValidator;
 import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
-import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.exception.BusinessException;
+import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
@@ -35,7 +35,6 @@ public class AssignmentAttachmentService {
     private final AttachmentRepository attachmentRepository;
     private final MemberRepository memberRepository;
     private final FileStorage fileStorage;
-    private final AwsProperties awsProperties;
     private final AttachmentFileValidator fileValidator;
     private final AttachmentStorageLifecycle storageLifecycle;
     private final AssignmentAttachmentCleanup cleanup;
@@ -45,7 +44,6 @@ public class AssignmentAttachmentService {
                                        AttachmentRepository attachmentRepository,
                                        MemberRepository memberRepository,
                                        FileStorage fileStorage,
-                                       AwsProperties awsProperties,
                                        AttachmentFileValidator fileValidator,
                                        AttachmentStorageLifecycle storageLifecycle,
                                        AssignmentAttachmentCleanup cleanup) {
@@ -54,7 +52,6 @@ public class AssignmentAttachmentService {
         this.attachmentRepository = attachmentRepository;
         this.memberRepository = memberRepository;
         this.fileStorage = fileStorage;
-        this.awsProperties = awsProperties;
         this.fileValidator = fileValidator;
         this.storageLifecycle = storageLifecycle;
         this.cleanup = cleanup;
@@ -98,9 +95,9 @@ public class AssignmentAttachmentService {
         requireMember(memberId);
         AssignmentAttachment link = findAssignmentAttachment(attachmentId);
         Attachment attachment = link.getAttachment();
-        String downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
-        long expiresIn = Math.multiplyExact(awsProperties.getS3().getPresignedExpirationMinutes(), 60L);
-        return new AssignmentAttachmentDownloadUrlResponse(downloadUrl, expiresIn, attachment.getOriginalName());
+        DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
+        return new AssignmentAttachmentDownloadUrlResponse(
+                downloadUrl.url(), downloadUrl.expiresInSeconds(), attachment.getOriginalName());
     }
 
     @Transactional

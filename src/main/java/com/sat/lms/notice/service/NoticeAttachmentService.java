@@ -6,8 +6,8 @@ import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
 import com.sat.lms.attachment.service.AttachmentFileValidator;
 import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
-import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.exception.BusinessException;
+import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
@@ -35,7 +35,6 @@ public class NoticeAttachmentService {
     private final AttachmentRepository attachmentRepository;
     private final MemberRepository memberRepository;
     private final FileStorage fileStorage;
-    private final AwsProperties awsProperties;
     private final NoticeAttachmentCleanup cleanup;
     private final AttachmentFileValidator fileValidator;
     private final AttachmentStorageLifecycle storageLifecycle;
@@ -45,7 +44,6 @@ public class NoticeAttachmentService {
                                    AttachmentRepository attachmentRepository,
                                    MemberRepository memberRepository,
                                    FileStorage fileStorage,
-                                   AwsProperties awsProperties,
                                    NoticeAttachmentCleanup cleanup,
                                    AttachmentFileValidator fileValidator,
                                    AttachmentStorageLifecycle storageLifecycle) {
@@ -54,7 +52,6 @@ public class NoticeAttachmentService {
         this.attachmentRepository = attachmentRepository;
         this.memberRepository = memberRepository;
         this.fileStorage = fileStorage;
-        this.awsProperties = awsProperties;
         this.cleanup = cleanup;
         this.fileValidator = fileValidator;
         this.storageLifecycle = storageLifecycle;
@@ -98,9 +95,9 @@ public class NoticeAttachmentService {
         requireMember(memberId);
         NoticeAttachment link = findNoticeAttachment(attachmentId);
         Attachment attachment = link.getAttachment();
-        String downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
-        long expiresIn = Math.multiplyExact(awsProperties.getS3().getPresignedExpirationMinutes(), 60L);
-        return new NoticeAttachmentDownloadUrlResponse(downloadUrl, expiresIn, attachment.getOriginalName());
+        DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
+        return new NoticeAttachmentDownloadUrlResponse(
+                downloadUrl.url(), downloadUrl.expiresInSeconds(), attachment.getOriginalName());
     }
 
     @Transactional

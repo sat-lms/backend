@@ -9,8 +9,8 @@ import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
 import com.sat.lms.attachment.service.AttachmentFileValidator;
 import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
-import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.exception.BusinessException;
+import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -58,12 +59,10 @@ class AssignmentAttachmentServiceTest {
         memberRepository = mock(MemberRepository.class);
         fileStorage = mock(FileStorage.class);
         lifecycle = new AttachmentStorageLifecycle(fileStorage);
-        AwsProperties properties = new AwsProperties();
-        properties.getS3().setPresignedExpirationMinutes(5);
         AssignmentAttachmentCleanup cleanup = new AssignmentAttachmentCleanup(
                 assignmentAttachmentRepository, noticeAttachmentRepository, attachmentRepository, lifecycle);
         service = new AssignmentAttachmentService(assignmentRepository, assignmentAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage, properties,
+                attachmentRepository, memberRepository, fileStorage,
                 new AttachmentFileValidator(), lifecycle, cleanup);
     }
 
@@ -194,18 +193,21 @@ class AssignmentAttachmentServiceTest {
         when(link.getAttachment()).thenReturn(attachment);
         when(assignmentAttachmentRepository.findWithAssignmentAndAttachmentByAttachmentId(1L))
                 .thenReturn(Optional.of(link));
-        when(fileStorage.createDownloadUrl("assignments/10/a.pdf")).thenReturn("https://signed.test");
+        when(fileStorage.createDownloadUrl("assignments/10/a.pdf"))
+                .thenReturn(new DownloadUrl("https://signed.test", 347L));
 
         var response = service.getDownloadUrl(1L, 8L);
         assertThat(response.getDownloadUrl()).isEqualTo("https://signed.test");
-        assertThat(response.getExpiresIn()).isEqualTo(300L);
+        assertThat(response.getExpiresIn()).isEqualTo(347L);
         assertThat(response.getOriginalName()).isEqualTo("원본.pdf");
         stubMember(7L, MemberRole.ADMIN);
         assertThat(service.getDownloadUrl(1L, 7L).getDownloadUrl()).isEqualTo("https://signed.test");
 
+        clearInvocations(fileStorage);
         when(assignmentAttachmentRepository.findWithAssignmentAndAttachmentByAttachmentId(99L))
                 .thenReturn(Optional.empty());
         assertStatus(() -> service.getDownloadUrl(99L, 8L), HttpStatus.NOT_FOUND);
+        verify(fileStorage, never()).createDownloadUrl(anyString());
     }
 
     @Test

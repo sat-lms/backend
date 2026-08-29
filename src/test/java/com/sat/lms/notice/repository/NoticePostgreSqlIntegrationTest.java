@@ -19,6 +19,7 @@ import com.sat.lms.notice.entity.Notice;
 import com.sat.lms.notice.entity.NoticeRead;
 import com.sat.lms.notice.service.NoticeService;
 import com.sat.lms.global.security.JwtTokenProvider;
+import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.submission.entity.Submission;
@@ -566,7 +567,7 @@ class NoticePostgreSqlIntegrationTest {
 
         Long attachmentId = ((Number) rows.get(0).get("id")).longValue();
         when(fileStorage.createDownloadUrl("notices/" + noticeId + "/" + firstStored))
-                .thenReturn("https://example.test/signed");
+                .thenReturn(new DownloadUrl("https://example.test/signed", 300L));
         mockMvc.perform(get("/api/v1/notice-attachments/{attachmentId}/download-url", attachmentId)
                         .header("Authorization", "Bearer "
                                 + jwtTokenProvider.createAccessToken(studentId, "STUDENT")))

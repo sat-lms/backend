@@ -3,6 +3,7 @@ package com.sat.lms.submission.repository;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
 import com.sat.lms.global.security.JwtTokenProvider;
+import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileExtensionExtractor;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
@@ -314,7 +315,8 @@ class SubmissionPostgreSqlIntegrationTest {
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isCreated());
         Long attachmentId = attachmentRepository.findAll().get(0).getId();
-        when(fileStorage.createDownloadUrl(anyString())).thenReturn("https://example.com/signed");
+        when(fileStorage.createDownloadUrl(anyString()))
+                .thenReturn(new DownloadUrl("https://example.com/signed", 300L));
 
         mockMvc.perform(get("/api/v1/submission-attachments/{attachmentId}/download-url", attachmentId)
                         .header("Authorization", "Bearer " + studentToken))

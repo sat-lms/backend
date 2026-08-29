@@ -135,21 +135,40 @@ class S3FileStorageTest {
         assertThat(request.getValue().key()).isEqualTo("notices/1/file.pdf");
     }
 
-    @Test
-    void presignedGetUsesConfiguredExpirationWithoutExistenceCall() throws Exception {
+    @ParameterizedTest
+    @ValueSource(longs = {5, 11})
+    void presignedGetReturnsUrlAndExactConfiguredExpiration(long expirationMinutes) throws Exception {
         PresignedGetObjectRequest presigned = mock(PresignedGetObjectRequest.class);
         when(presigned.url()).thenReturn(URI.create("https://example.invalid/signed").toURL());
         when(presigner.presignGetObject(any(GetObjectPresignRequest.class))).thenReturn(presigned);
+        S3FileStorage configuredStorage = new S3FileStorage(
+                s3Client, presigner, properties("test-private-bucket", expirationMinutes));
 
-        String url = storage.createDownloadUrl("submissions/3/file.docx");
+        DownloadUrl downloadUrl = configuredStorage.createDownloadUrl("submissions/3/file.docx");
 
         ArgumentCaptor<GetObjectPresignRequest> request = ArgumentCaptor.forClass(GetObjectPresignRequest.class);
         verify(presigner).presignGetObject(request.capture());
-        assertThat(url).isEqualTo("https://example.invalid/signed");
-        assertThat(request.getValue().signatureDuration()).isEqualTo(Duration.ofMinutes(7));
+        Duration signatureDuration = request.getValue().signatureDuration();
+        assertThat(downloadUrl.url()).isEqualTo("https://example.invalid/signed");
+        assertThat(signatureDuration).isEqualTo(Duration.ofMinutes(expirationMinutes));
+        assertThat(downloadUrl.expiresInSeconds()).isEqualTo(signatureDuration.toSeconds());
         GetObjectRequest objectRequest = request.getValue().getObjectRequest();
         assertThat(objectRequest.bucket()).isEqualTo("test-private-bucket");
         assertThat(objectRequest.key()).isEqualTo("submissions/3/file.docx");
+    }
+
+    @Test
+    void presignSdkFailureUsesExistingSafeStorageException() {
+        when(presigner.presignGetObject(any(GetObjectPresignRequest.class)))
+                .thenThrow(S3Exception.builder().statusCode(500).message("sensitive internal detail").build());
+
+        assertThatThrownBy(() -> storage.createDownloadUrl("submissions/3/file.docx"))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+                    assertThat(exception.getMessage())
+                            .isEqualTo("파일 저장소 처리에 실패했습니다.")
+                            .doesNotContain("sensitive", "internal");
+                });
     }
 
     @Test
