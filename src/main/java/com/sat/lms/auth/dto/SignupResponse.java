@@ -2,6 +2,8 @@ package com.sat.lms.auth.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
+import java.time.OffsetDateTime;
+
 @Schema(description = "회원가입 신청 응답")
 public class SignupResponse {
 
@@ -18,9 +20,9 @@ public class SignupResponse {
     private final String status;
 
     @Schema(description = "가입 신청 일시", example = "2026-08-07T10:00:00+09:00")
-    private final java.time.OffsetDateTime createdAt;
+    private final OffsetDateTime createdAt;
 
-    public SignupResponse(Long memberId, String studentNumber, String name, String status, java.time.OffsetDateTime createdAt) {
+    public SignupResponse(Long memberId, String studentNumber, String name, String status, OffsetDateTime createdAt) {
         this.memberId = memberId;
         this.studentNumber = studentNumber;
         this.name = name;
@@ -44,7 +46,7 @@ public class SignupResponse {
         return status;
     }
 
-    public java.time.OffsetDateTime getCreatedAt() {
+    public OffsetDateTime getCreatedAt() {
         return createdAt;
     }
 }

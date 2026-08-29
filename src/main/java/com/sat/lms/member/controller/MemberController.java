@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Member API", description = "회원 정보 API")
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/members")
 public class MemberController {
@@ -20,7 +21,6 @@ public class MemberController {
     public MemberController(MemberService memberService) { this.memberService = memberService; }
 
     @Operation(summary = "내 정보 조회", description = "Bearer JWT에서 회원 ID를 확인하여 현재 회원을 조회합니다.")
-    @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/me")
     public ApiResponse<MemberMeResponse> getMe(@AuthenticationPrincipal Long memberId) {
         return ApiResponse.success("내 정보를 조회했습니다.", memberService.getMe(memberId));

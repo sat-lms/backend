@@ -24,7 +24,7 @@ public class MemberReviewResponse {
     @Schema(description = "심사 처리 일시", example = "2026-08-07T02:00:00+09:00")
     private final OffsetDateTime reviewedAt;
 
-    public MemberReviewResponse(Long memberId, String status, Long reviewerId, String rejectionReason, OffsetDateTime reviewedAt) {
+    private MemberReviewResponse(Long memberId, String status, Long reviewerId, String rejectionReason, OffsetDateTime reviewedAt) {
         this.memberId = memberId;
         this.status = status;
         this.reviewerId = reviewerId;
@@ -32,7 +32,7 @@ public class MemberReviewResponse {
         this.reviewedAt = reviewedAt;
     }
 
-    public static MemberReviewResponse of(Member member, MemberReview review) {
+    public static MemberReviewResponse from(Member member, MemberReview review) {
         return new MemberReviewResponse(
                 member.getId(),
                 member.getStatus().name(),
