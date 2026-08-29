@@ -7,12 +7,14 @@ import com.sat.lms.global.security.JwtTokenProvider;
 import com.sat.lms.submission.dto.SubmissionListResponse;
 import com.sat.lms.submission.service.SubmissionService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -20,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.OffsetDateTime;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -71,17 +74,21 @@ class MySubmissionControllerSecurityTest {
     }
 
     @Test
-    void pagingParametersArePassedThroughAndStraySortParamIsIgnored() throws Exception {
+    void pageableParametersArePassedToServiceForFixedSortNormalization() throws Exception {
         authenticate("student", 8L, "STUDENT");
         Page<SubmissionListResponse> page = new PageImpl<>(List.of(), PageRequest.of(1, 5), 0);
-        when(submissionService.getMySubmissions(eq(8L), eq(PageRequest.of(1, 5)))).thenReturn(page);
+        when(submissionService.getMySubmissions(eq(8L), any(Pageable.class))).thenReturn(page);
 
         mockMvc.perform(get("/api/v1/members/me/submissions")
                         .param("page", "1").param("size", "5").param("sort", "updatedAt,desc")
                         .header("Authorization", "Bearer student"))
                 .andExpect(status().isOk());
 
-        verify(submissionService).getMySubmissions(eq(8L), eq(PageRequest.of(1, 5)));
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(submissionService).getMySubmissions(eq(8L), pageable.capture());
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(5);
+        assertThat(pageable.getValue().getSort().getOrderFor("updatedAt").isDescending()).isTrue();
     }
 
     private void authenticate(String token, Long memberId, String role) {

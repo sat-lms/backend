@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springdoc.core.annotations.ParameterObject;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -48,6 +49,7 @@ public class MemberApplicationController {
     public ApiResponse<PageResponse<MemberApplicationResponse>> getMemberApplications(
             @Parameter(description = "조회할 가입 신청 상태", example = "PENDING")
             @RequestParam(required = false, defaultValue = "PENDING") MemberStatus status,
+            @ParameterObject
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.ASC) Pageable pageable
     ) {
         Page<MemberApplicationResponse> applications = memberApplicationService.getMemberApplications(status, pageable);

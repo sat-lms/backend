@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 
 import java.time.Clock;
@@ -117,7 +119,7 @@ class AssignmentServiceTest {
         when(memberRepository.findById(8L)).thenReturn(Optional.of(student));
         when(assignmentRepository.findAssignmentPage(any())).thenReturn(Page.empty());
 
-        service.getAssignments(8L, 1, 5, "dueAt,asc");
+        service.getAssignments(8L, PageRequest.of(1, 5, Sort.by(Sort.Direction.ASC, "dueAt")));
 
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
         verify(assignmentRepository).findAssignmentPage(captor.capture());
@@ -133,13 +135,15 @@ class AssignmentServiceTest {
         when(assignmentRepository.findAssignmentPage(any())).thenReturn(Page.empty());
 
         for (String field : new String[]{"createdAt", "updatedAt", "dueAt", "title"}) {
-            service.getAssignments(8L, 0, 20, field + ",desc");
+            for (Sort.Direction direction : Sort.Direction.values()) {
+                service.getAssignments(8L, PageRequest.of(0, 20, Sort.by(direction, field)));
+            }
         }
-        service.getAssignments(8L, 0, 20, null);
+        service.getAssignments(8L, PageRequest.of(0, 20));
 
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-        verify(assignmentRepository, org.mockito.Mockito.times(5)).findAssignmentPage(captor.capture());
-        Pageable defaultPageable = captor.getAllValues().get(4);
+        verify(assignmentRepository, org.mockito.Mockito.times(9)).findAssignmentPage(captor.capture());
+        Pageable defaultPageable = captor.getAllValues().get(8);
         assertThat(defaultPageable.getSort().getOrderFor("dueAt").isAscending()).isTrue();
         assertThat(defaultPageable.getSort().getOrderFor("id").isAscending()).isTrue();
     }
@@ -149,10 +153,12 @@ class AssignmentServiceTest {
         Member student = member(MemberRole.STUDENT);
         when(memberRepository.findById(8L)).thenReturn(Optional.of(student));
 
-        assertBadRequest(() -> service.getAssignments(8L, 0, 20, "content,asc"));
-        assertBadRequest(() -> service.getAssignments(8L, 0, 20, "dueAt,sideways"));
-        assertBadRequest(() -> service.getAssignments(8L, 0, 20, " dueAt,asc"));
-        assertBadRequest(() -> service.getAssignments(8L, 0, 20, "dueAt,asc,createdAt"));
+        assertBadRequest(() -> service.getAssignments(8L,
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "content"))));
+        assertBadRequest(() -> service.getAssignments(8L,
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, " dueAt"))));
+        assertBadRequest(() -> service.getAssignments(8L, PageRequest.of(0, 20, Sort.by(
+                Sort.Order.asc("dueAt"), Sort.Order.asc("createdAt")))));
         verify(assignmentRepository, never()).findAssignmentPage(any());
     }
 
@@ -203,7 +209,8 @@ class AssignmentServiceTest {
     void missingMemberReturnsNotFoundBeforeRepositoryAccess() {
         when(memberRepository.findById(404L)).thenReturn(Optional.empty());
 
-        assertNotFound(() -> service.getAssignments(404L, 0, 20, "createdAt,desc"));
+        assertNotFound(() -> service.getAssignments(404L,
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"))));
         assertNotFound(() -> service.getAssignment(1L, 404L));
         assertNotFound(() -> service.create(mock(AssignmentCreateRequest.class), 404L));
         verify(assignmentRepository, never()).findById(any());

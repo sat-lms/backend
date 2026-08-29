@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -21,8 +22,6 @@ import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -78,8 +77,8 @@ class AssignmentControllerSecurityTest {
 
     @Test
     void authenticatedStudentAndAdminCanListAndReadDetail() throws Exception {
-        when(assignmentService.getAssignments(eq(8L), anyInt(), anyInt(), anyString())).thenReturn(Page.empty());
-        when(assignmentService.getAssignments(eq(7L), anyInt(), anyInt(), anyString())).thenReturn(Page.empty());
+        when(assignmentService.getAssignments(eq(8L), any(Pageable.class))).thenReturn(Page.empty());
+        when(assignmentService.getAssignments(eq(7L), any(Pageable.class))).thenReturn(Page.empty());
         authenticate("student", 8L, "STUDENT");
         authenticate("admin", 7L, "ADMIN");
 
@@ -219,12 +218,30 @@ class AssignmentControllerSecurityTest {
     @Test
     void defaultListSortIsDueAtAscending() throws Exception {
         authenticate("student", 8L, "STUDENT");
-        when(assignmentService.getAssignments(eq(8L), anyInt(), anyInt(), anyString())).thenReturn(Page.empty());
+        when(assignmentService.getAssignments(eq(8L), any(Pageable.class))).thenReturn(Page.empty());
 
         mockMvc.perform(get("/api/v1/assignments").header("Authorization", "Bearer student"))
                 .andExpect(status().isOk());
 
-        verify(assignmentService).getAssignments(8L, 0, 20, "dueAt,asc");
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(assignmentService).getAssignments(eq(8L), pageable.capture());
+        assertThat(pageable.getValue().getPageNumber()).isZero();
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(20);
+        assertThat(pageable.getValue().getSort().isUnsorted()).isTrue();
+    }
+
+    @Test
+    void sizeAboveSpringDefaultMaximumIsCappedByResolver() throws Exception {
+        authenticate("student", 8L, "STUDENT");
+        when(assignmentService.getAssignments(eq(8L), any(Pageable.class))).thenReturn(Page.empty());
+
+        mockMvc.perform(get("/api/v1/assignments?size=2001")
+                        .header("Authorization", "Bearer student"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(assignmentService).getAssignments(eq(8L), pageable.capture());
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(2000);
     }
 
     @Test
@@ -244,11 +261,25 @@ class AssignmentControllerSecurityTest {
     @Test
     void invalidPagingAndDuplicateSortParametersReturnBadRequest() throws Exception {
         authenticate("student", 8L, "STUDENT");
+        when(assignmentService.getAssignments(eq(8L), any(Pageable.class))).thenAnswer(invocation -> {
+            Pageable pageable = invocation.getArgument(1);
+            assertThat(pageable.getSort().stream().count()).isEqualTo(2);
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "정렬 조건은 하나만 입력할 수 있습니다.");
+        });
 
         mockMvc.perform(get("/api/v1/assignments?page=-1")
                         .header("Authorization", "Bearer student"))
                 .andExpect(status().isBadRequest());
         mockMvc.perform(get("/api/v1/assignments?size=0")
+                        .header("Authorization", "Bearer student"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/assignments?size=-1")
+                        .header("Authorization", "Bearer student"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/assignments?page=not-a-number")
+                        .header("Authorization", "Bearer student"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/assignments?size=not-a-number")
                         .header("Authorization", "Bearer student"))
                 .andExpect(status().isBadRequest());
         mockMvc.perform(get("/api/v1/assignments?sort=createdAt,desc&sort=dueAt,asc")
