@@ -50,9 +50,9 @@ class S3FileStorageIntegrationTest {
             try {
                 stored = storage.upload(new MockMultipartFile(
                         "file", "test.txt", "text/plain", content), directory);
-                String downloadUrl = storage.createDownloadUrl(stored.storageKey());
+                DownloadUrl downloadUrl = storage.createDownloadUrl(stored.storageKey());
                 HttpResponse<byte[]> response = HttpClient.newHttpClient().send(
-                        HttpRequest.newBuilder(URI.create(downloadUrl)).GET().build(),
+                        HttpRequest.newBuilder(URI.create(downloadUrl.url())).GET().build(),
                         HttpResponse.BodyHandlers.ofByteArray());
                 assertThat(response.statusCode()).isEqualTo(200);
                 assertThat(response.body()).isEqualTo(content);

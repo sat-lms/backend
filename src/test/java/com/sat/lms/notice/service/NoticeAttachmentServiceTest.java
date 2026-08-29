@@ -6,8 +6,8 @@ import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
 import com.sat.lms.attachment.service.AttachmentFileValidator;
 import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
-import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.exception.BusinessException;
+import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
@@ -60,10 +60,8 @@ class NoticeAttachmentServiceTest {
         fileStorage = mock(FileStorage.class);
         storageLifecycle = new AttachmentStorageLifecycle(fileStorage);
         cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle);
-        AwsProperties properties = new AwsProperties();
-        properties.getS3().setPresignedExpirationMinutes(5);
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage, properties, cleanup,
+                attachmentRepository, memberRepository, fileStorage, cleanup,
                 new AttachmentFileValidator(), storageLifecycle);
     }
 
@@ -223,7 +221,7 @@ class NoticeAttachmentServiceTest {
         reset(attachmentRepository, noticeAttachmentRepository);
         cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle);
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage, properties(), cleanup,
+                attachmentRepository, memberRepository, fileStorage, cleanup,
                 new AttachmentFileValidator(), storageLifecycle);
         when(attachmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(noticeAttachmentRepository.save(any())).thenThrow(new RuntimeException("link db failed"));
@@ -266,13 +264,14 @@ class NoticeAttachmentServiceTest {
         NoticeAttachment link = NoticeAttachment.create(mock(Notice.class), attachment);
         when(noticeAttachmentRepository.findWithNoticeAndAttachmentByAttachmentId(1L))
                 .thenReturn(Optional.of(link));
-        when(fileStorage.createDownloadUrl("notices/10/a.pdf")).thenReturn("https://example.test/signed");
+        when(fileStorage.createDownloadUrl("notices/10/a.pdf"))
+                .thenReturn(new DownloadUrl("https://example.test/signed", 347L));
 
         var response = service.getDownloadUrl(1L, 8L);
 
         assertThat(response.getOriginalName()).isEqualTo("원본.pdf");
         assertThat(response.getDownloadUrl()).isEqualTo("https://example.test/signed");
-        assertThat(response.getExpiresIn()).isEqualTo(300L);
+        assertThat(response.getExpiresIn()).isEqualTo(347L);
     }
 
     @Test
@@ -385,12 +384,6 @@ class NoticeAttachmentServiceTest {
 
     private Attachment attachment(String originalName, String storageKey) {
         return Attachment.create(originalName, "a.pdf", storageKey, "pdf", 1L);
-    }
-
-    private AwsProperties properties() {
-        AwsProperties properties = new AwsProperties();
-        properties.getS3().setPresignedExpirationMinutes(5);
-        return properties;
     }
 
     private void commit() {

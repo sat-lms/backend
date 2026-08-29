@@ -6,8 +6,8 @@ import com.sat.lms.attachment.entity.Attachment;
 import com.sat.lms.attachment.entity.SubmissionAttachment;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
-import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.exception.BusinessException;
+import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.FileExtensionExtractor;
 import com.sat.lms.global.storage.StoredFile;
@@ -65,19 +65,16 @@ public class SubmissionService {
     private final AttachmentRepository attachmentRepository;
     private final SubmissionAttachmentRepository submissionAttachmentRepository;
     private final FileStorage fileStorage;
-    private final AwsProperties awsProperties;
 
     public SubmissionService(SubmissionRepository submissionRepository, AssignmentRepository assignmentRepository,
                              MemberRepository memberRepository, AttachmentRepository attachmentRepository,
-                             SubmissionAttachmentRepository submissionAttachmentRepository, FileStorage fileStorage,
-                             AwsProperties awsProperties) {
+                             SubmissionAttachmentRepository submissionAttachmentRepository, FileStorage fileStorage) {
         this.submissionRepository = submissionRepository;
         this.assignmentRepository = assignmentRepository;
         this.memberRepository = memberRepository;
         this.attachmentRepository = attachmentRepository;
         this.submissionAttachmentRepository = submissionAttachmentRepository;
         this.fileStorage = fileStorage;
-        this.awsProperties = awsProperties;
     }
 
     public SubmissionDetailResponse getMySubmission(Long assignmentId, Long memberId) {
@@ -239,9 +236,9 @@ public class SubmissionService {
         requireOwnerOrAdmin(requester, link.getSubmission().getStudent());
 
         Attachment attachment = link.getAttachment();
-        String downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
-        long expiresIn = awsProperties.getS3().getPresignedExpirationMinutes() * 60;
-        return new SubmissionAttachmentDownloadUrlResponse(downloadUrl, expiresIn, attachment.getOriginalName());
+        DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
+        return new SubmissionAttachmentDownloadUrlResponse(
+                downloadUrl.url(), downloadUrl.expiresInSeconds(), attachment.getOriginalName());
     }
 
     @Transactional
