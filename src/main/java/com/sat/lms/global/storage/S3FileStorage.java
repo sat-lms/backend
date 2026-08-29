@@ -19,7 +19,6 @@ import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignReques
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
-import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -29,7 +28,6 @@ public class S3FileStorage implements FileStorage {
     private static final long BYTES_PER_KB = 1024L;
     private static final Pattern DIRECTORY_SEGMENT = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]*");
     private static final Pattern STORAGE_KEY_SEGMENT = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*");
-    private static final Pattern EXTENSION = Pattern.compile("[A-Za-z0-9]{1,20}");
     private static final String INVALID_FILE_MESSAGE = "올바르지 않은 파일입니다.";
     private static final String INVALID_PATH_MESSAGE = "올바르지 않은 저장 경로입니다.";
     private static final String STORAGE_FAILURE_MESSAGE = "파일 저장소 처리에 실패했습니다.";
@@ -54,7 +52,7 @@ public class S3FileStorage implements FileStorage {
         validateDirectory(directory);
         String bucket = requireBucket();
         String originalName = file.getOriginalFilename();
-        String extension = extractExtension(originalName);
+        String extension = FileExtensionExtractor.extract(originalName);
         String storedName = UUID.randomUUID() + (extension.isEmpty() ? "" : "." + extension);
         String storageKey = directory + "/" + storedName;
         long size = file.getSize();
@@ -126,7 +124,9 @@ public class S3FileStorage implements FileStorage {
                 || name.contains("/") || name.contains("\\") || name.chars().anyMatch(Character::isISOControl)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, INVALID_FILE_MESSAGE);
         }
-        extractExtension(name);
+        if (name.indexOf('.') > 0 && FileExtensionExtractor.extract(name).isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, INVALID_FILE_MESSAGE);
+        }
     }
 
     private void validateDirectory(String directory) {
@@ -151,19 +151,6 @@ public class S3FileStorage implements FileStorage {
             if (!segmentPattern.matcher(segment).matches()) return false;
         }
         return true;
-    }
-
-    private String extractExtension(String originalName) {
-        int lastDot = originalName.lastIndexOf('.');
-        if (lastDot < 1) return "";
-        if (lastDot == originalName.length() - 1) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, INVALID_FILE_MESSAGE);
-        }
-        String extension = originalName.substring(lastDot + 1).toLowerCase(Locale.ROOT);
-        if (!EXTENSION.matcher(extension).matches()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, INVALID_FILE_MESSAGE);
-        }
-        return extension;
     }
 
     private Long toKilobytes(long bytes) {

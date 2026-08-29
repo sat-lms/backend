@@ -196,11 +196,12 @@ class SubmissionServiceTest {
     @Test
     void disallowedExtensionReturnsBadRequest() {
         givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
-        MultipartFile file = multipartFile("virus.exe", 10);
-
-        assertThatThrownBy(() -> service.submit(1L, 3L, request(null), List.of(file)))
-                .isInstanceOfSatisfying(BusinessException.class,
-                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        for (String filename : List.of("virus.exe", ".sh")) {
+            MultipartFile file = multipartFile(filename, 10);
+            assertThatThrownBy(() -> service.submit(1L, 3L, request(null), List.of(file)))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        }
     }
 
     @Test

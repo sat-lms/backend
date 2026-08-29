@@ -191,7 +191,7 @@ class NoticeAttachmentServiceTest {
         assertBadRequest(() -> service.upload(10L, List.of(sizedFile("big.pdf", 20L * 1024 * 1024 + 1)), 7L));
         assertBadRequest(() -> service.upload(10L, List.of(sizedFile("a.pdf", 18L * 1024 * 1024),
                 sizedFile("b.pdf", 18L * 1024 * 1024), sizedFile("c.pdf", 18L * 1024 * 1024)), 7L));
-        for (String name : new String[]{"no-extension", "bad.exe", "../safe.pdf", "folder/safe.pdf", "file."}) {
+        for (String name : new String[]{"no-extension", ".pdf", "bad.exe", "../safe.pdf", "folder/safe.pdf", "file."}) {
             assertBadRequest(() -> service.upload(10L, List.of(file(name, 1)), 7L));
         }
         verify(fileStorage, never()).upload(any(), anyString());

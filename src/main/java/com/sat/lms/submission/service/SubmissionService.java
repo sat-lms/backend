@@ -9,6 +9,7 @@ import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
 import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.FileStorage;
+import com.sat.lms.global.storage.FileExtensionExtractor;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
@@ -35,7 +36,6 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -359,7 +359,7 @@ public class SubmissionService {
             if (file.getSize() > MAX_FILE_SIZE_BYTES) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "파일 1개의 용량은 50MB를 초과할 수 없습니다.");
             }
-            if (!ALLOWED_EXTENSIONS.contains(extractExtension(file.getOriginalFilename()))) {
+            if (!ALLOWED_EXTENSIONS.contains(FileExtensionExtractor.extract(file.getOriginalFilename()))) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "허용되지 않는 파일 확장자입니다.");
             }
             total += file.getSize();
@@ -367,13 +367,6 @@ public class SubmissionService {
         if (total > MAX_TOTAL_SIZE_BYTES) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "전체 파일 용량은 100MB를 초과할 수 없습니다.");
         }
-    }
-
-    private String extractExtension(String originalName) {
-        if (originalName == null) return "";
-        int lastDot = originalName.lastIndexOf('.');
-        if (lastDot < 0 || lastDot == originalName.length() - 1) return "";
-        return originalName.substring(lastDot + 1).toLowerCase(Locale.ROOT);
     }
 
     private Assignment requireAssignment(Long assignmentId) {

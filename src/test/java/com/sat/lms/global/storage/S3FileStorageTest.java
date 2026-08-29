@@ -5,6 +5,8 @@ import com.sat.lms.global.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
@@ -21,6 +23,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -81,6 +84,17 @@ class S3FileStorageTest {
         assertThat(stored.sizeKb()).isEqualTo(1L);
         assertThat(stored.extension()).isEmpty();
         assertThat(stored.storedName()).doesNotContain(".");
+    }
+
+    @ParameterizedTest
+    @MethodSource("normalKoreanFilenames")
+    void normalKoreanFilenamePassesUploadValidation(String filename, String expectedExtension) {
+        StoredFile stored = storage.upload(new MockMultipartFile(
+                "file", filename, "application/octet-stream", new byte[]{1}), "submissions/1");
+
+        assertThat(stored.originalName()).isEqualTo(filename);
+        assertThat(stored.extension()).isEqualTo(expectedExtension);
+        assertThat(stored.storedName()).endsWith("." + expectedExtension);
     }
 
     @Test
@@ -174,6 +188,15 @@ class S3FileStorageTest {
 
     private MockMultipartFile file() {
         return new MockMultipartFile("file", "test.txt", "text/plain", "content".getBytes());
+    }
+
+    static Stream<Arguments> normalKoreanFilenames() {
+        return Stream.of(
+                Arguments.of("(제출서류)AI활용 아이디어 서약서 서식.pdf", "pdf"),
+                Arguments.of("5월14일 실습사진.png", "png"),
+                Arguments.of("경진대회 개요서 (2).pdf", "pdf"),
+                Arguments.of("과제 최종본.v2.JAVA", "java")
+        );
     }
 
     private AwsProperties properties(String bucket, long expirationMinutes) {
