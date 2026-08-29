@@ -32,8 +32,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -65,16 +64,19 @@ public class SubmissionService {
     private final AttachmentRepository attachmentRepository;
     private final SubmissionAttachmentRepository submissionAttachmentRepository;
     private final FileStorage fileStorage;
+    private final Clock clock;
 
     public SubmissionService(SubmissionRepository submissionRepository, AssignmentRepository assignmentRepository,
                              MemberRepository memberRepository, AttachmentRepository attachmentRepository,
-                             SubmissionAttachmentRepository submissionAttachmentRepository, FileStorage fileStorage) {
+                             SubmissionAttachmentRepository submissionAttachmentRepository, FileStorage fileStorage,
+                             Clock clock) {
         this.submissionRepository = submissionRepository;
         this.assignmentRepository = assignmentRepository;
         this.memberRepository = memberRepository;
         this.attachmentRepository = attachmentRepository;
         this.submissionAttachmentRepository = submissionAttachmentRepository;
         this.fileStorage = fileStorage;
+        this.clock = clock;
     }
 
     public SubmissionDetailResponse getMySubmission(Long assignmentId, Long memberId) {
@@ -337,7 +339,7 @@ public class SubmissionService {
     }
 
     private boolean determineLateAndRequireEditable(Assignment assignment) {
-        boolean late = OffsetDateTime.now(ZoneOffset.UTC).isAfter(assignment.getDueAt());
+        boolean late = clock.instant().isAfter(assignment.getDueAt().toInstant());
         if (late && !assignment.isAllowLateSubmission()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, LATE_BLOCKED_MESSAGE);
         }

@@ -29,6 +29,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.lang.reflect.Field;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -40,6 +42,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -64,7 +67,7 @@ class SubmissionServiceTest {
         submissionAttachmentRepository = mock(SubmissionAttachmentRepository.class);
         fileStorage = mock(FileStorage.class);
         service = new SubmissionService(submissionRepository, assignmentRepository, memberRepository,
-                attachmentRepository, submissionAttachmentRepository, fileStorage);
+                attachmentRepository, submissionAttachmentRepository, fileStorage, Clock.systemUTC());
 
         when(submissionRepository.save(any())).thenAnswer(invocation -> {
             Submission submission = invocation.getArgument(0);
@@ -142,6 +145,58 @@ class SubmissionServiceTest {
         var response = service.submit(1L, 3L, request("내용"), null);
 
         assertThat(response.getIsLate()).isTrue();
+    }
+
+    @Test
+    void submitUsesInstantBoundaryFromFixedClock() {
+        Instant now = Instant.parse("2026-08-30T00:00:00Z");
+        useClock(Clock.fixed(now, ZoneOffset.UTC));
+
+        givenStudentAndAssignment(3L, false, OffsetDateTime.ofInstant(now.plusSeconds(1), ZoneOffset.UTC));
+        assertThat(service.submit(1L, 3L, request("before"), null).getIsLate()).isFalse();
+
+        givenStudentAndAssignment(3L, false, OffsetDateTime.ofInstant(now, ZoneOffset.ofHours(9)));
+        assertThat(service.submit(1L, 3L, request("equal"), null).getIsLate()).isFalse();
+
+        clearInvocations(submissionRepository, attachmentRepository, fileStorage);
+        givenStudentAndAssignment(3L, false, OffsetDateTime.ofInstant(now.minusSeconds(1), ZoneOffset.UTC));
+        assertThatThrownBy(() -> service.submit(1L, 3L, request("after"), null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verify(fileStorage, never()).upload(any(), anyString());
+        verify(submissionRepository, never()).save(any());
+        verify(attachmentRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void submitAfterDeadlineIsLateWhenAllowedByFixedClock() {
+        Instant now = Instant.parse("2026-08-30T00:00:00Z");
+        useClock(Clock.fixed(now, ZoneOffset.UTC));
+        givenStudentAndAssignment(3L, true, OffsetDateTime.ofInstant(now.minusSeconds(1), ZoneOffset.ofHours(-4)));
+
+        assertThat(service.submit(1L, 3L, request("late"), null).getIsLate()).isTrue();
+    }
+
+    @Test
+    void resubmitUsesSameFixedClockBoundaryPolicy() {
+        Instant now = Instant.parse("2026-08-30T00:00:00Z");
+        useClock(Clock.fixed(now, ZoneOffset.UTC));
+        Member student = student(3L);
+        Assignment assignment = assignment(true, OffsetDateTime.ofInstant(now.minusSeconds(1), ZoneOffset.ofHours(9)));
+        Submission submission = existingSubmission(5L, student, assignment, "old", false);
+        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of());
+
+        assertThat(service.resubmit(1L, 3L, request("late"), null).getIsLate()).isTrue();
+
+        Assignment blocked = assignment(false, OffsetDateTime.ofInstant(now.minusSeconds(1), ZoneOffset.UTC));
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(blocked));
+        assertThatThrownBy(() -> service.resubmit(1L, 3L, request("blocked"), null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verify(fileStorage, never()).upload(any(), anyString());
     }
 
     @Test
@@ -818,6 +873,11 @@ class SubmissionServiceTest {
         when(file.getSize()).thenReturn(size);
         when(file.getOriginalFilename()).thenReturn(originalName);
         return file;
+    }
+
+    private void useClock(Clock clock) {
+        service = new SubmissionService(submissionRepository, assignmentRepository, memberRepository,
+                attachmentRepository, submissionAttachmentRepository, fileStorage, clock);
     }
 
     private void setId(Submission submission, Long id) {
