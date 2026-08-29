@@ -6,6 +6,7 @@ import com.sat.lms.assignment.dto.AssignmentListResponse;
 import com.sat.lms.assignment.dto.AssignmentUpdateRequest;
 import com.sat.lms.assignment.entity.Assignment;
 import com.sat.lms.assignment.repository.AssignmentRepository;
+import com.sat.lms.attachment.repository.AssignmentAttachmentRepository;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
@@ -35,15 +36,21 @@ public class AssignmentService {
     private final SubmissionRepository submissionRepository;
     private final MemberRepository memberRepository;
     private final Clock clock;
+    private final AssignmentAttachmentRepository assignmentAttachmentRepository;
+    private final AssignmentAttachmentCleanup attachmentCleanup;
 
     public AssignmentService(AssignmentRepository assignmentRepository,
                              SubmissionRepository submissionRepository,
                              MemberRepository memberRepository,
-                             Clock clock) {
+                             Clock clock,
+                             AssignmentAttachmentRepository assignmentAttachmentRepository,
+                             AssignmentAttachmentCleanup attachmentCleanup) {
         this.assignmentRepository = assignmentRepository;
         this.submissionRepository = submissionRepository;
         this.memberRepository = memberRepository;
         this.clock = clock;
+        this.assignmentAttachmentRepository = assignmentAttachmentRepository;
+        this.attachmentCleanup = attachmentCleanup;
     }
 
     @Transactional
@@ -62,7 +69,9 @@ public class AssignmentService {
 
     public AssignmentDetailResponse getAssignment(Long assignmentId, Long memberId) {
         requireMember(memberId);
-        return AssignmentDetailResponse.from(findAssignment(assignmentId));
+        Assignment assignment = findAssignment(assignmentId);
+        return AssignmentDetailResponse.from(assignment,
+                assignmentAttachmentRepository.findWithAttachmentByAssignmentId(assignmentId));
     }
 
     @Transactional
@@ -91,7 +100,9 @@ public class AssignmentService {
         if (submissionRepository.existsByAssignmentId(assignmentId)) {
             throw new BusinessException(HttpStatus.CONFLICT, "제출물이 존재하는 과제는 삭제할 수 없습니다.");
         }
+        attachmentCleanup.deleteAllForAssignment(assignmentId);
         assignmentRepository.delete(assignment);
+        assignmentRepository.flush();
     }
 
     private Sort parseSort(String value) {

@@ -4,6 +4,8 @@ import com.sat.lms.attachment.entity.Attachment;
 import com.sat.lms.attachment.entity.NoticeAttachment;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
+import com.sat.lms.attachment.service.AttachmentFileValidator;
+import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
 import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.FileStorage;
@@ -46,6 +48,7 @@ class NoticeAttachmentServiceTest {
     MemberRepository memberRepository;
     FileStorage fileStorage;
     NoticeAttachmentCleanup cleanup;
+    AttachmentStorageLifecycle storageLifecycle;
     NoticeAttachmentService service;
 
     @BeforeEach
@@ -55,11 +58,13 @@ class NoticeAttachmentServiceTest {
         attachmentRepository = mock(AttachmentRepository.class);
         memberRepository = mock(MemberRepository.class);
         fileStorage = mock(FileStorage.class);
-        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, fileStorage);
+        storageLifecycle = new AttachmentStorageLifecycle(fileStorage);
+        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle);
         AwsProperties properties = new AwsProperties();
         properties.getS3().setPresignedExpirationMinutes(5);
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage, properties, cleanup);
+                attachmentRepository, memberRepository, fileStorage, properties, cleanup,
+                new AttachmentFileValidator(), storageLifecycle);
     }
 
     @AfterEach
@@ -216,9 +221,10 @@ class NoticeAttachmentServiceTest {
         verify(fileStorage).delete("notices/10/a.pdf");
 
         reset(attachmentRepository, noticeAttachmentRepository);
-        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, fileStorage);
+        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle);
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage, properties(), cleanup);
+                attachmentRepository, memberRepository, fileStorage, properties(), cleanup,
+                new AttachmentFileValidator(), storageLifecycle);
         when(attachmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(noticeAttachmentRepository.save(any())).thenThrow(new RuntimeException("link db failed"));
         assertThatThrownBy(() -> service.upload(10L, List.of(file), 7L)).hasMessage("link db failed");

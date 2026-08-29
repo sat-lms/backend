@@ -4,6 +4,7 @@ import com.sat.lms.assignment.dto.AssignmentCreateRequest;
 import com.sat.lms.assignment.dto.AssignmentUpdateRequest;
 import com.sat.lms.assignment.entity.Assignment;
 import com.sat.lms.assignment.repository.AssignmentRepository;
+import com.sat.lms.attachment.repository.AssignmentAttachmentRepository;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
@@ -36,6 +37,8 @@ class AssignmentServiceTest {
     AssignmentRepository assignmentRepository;
     SubmissionRepository submissionRepository;
     MemberRepository memberRepository;
+    AssignmentAttachmentRepository assignmentAttachmentRepository;
+    AssignmentAttachmentCleanup attachmentCleanup;
     AssignmentService service;
 
     @BeforeEach
@@ -43,8 +46,10 @@ class AssignmentServiceTest {
         assignmentRepository = mock(AssignmentRepository.class);
         submissionRepository = mock(SubmissionRepository.class);
         memberRepository = mock(MemberRepository.class);
+        assignmentAttachmentRepository = mock(AssignmentAttachmentRepository.class);
+        attachmentCleanup = mock(AssignmentAttachmentCleanup.class);
         service = new AssignmentService(assignmentRepository, submissionRepository, memberRepository,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), assignmentAttachmentRepository, attachmentCleanup);
     }
 
     @Test
@@ -228,7 +233,9 @@ class AssignmentServiceTest {
 
         service.delete(1L, 7L);
 
+        verify(attachmentCleanup).deleteAllForAssignment(1L);
         verify(assignmentRepository).delete(assignment);
+        verify(assignmentRepository).flush();
     }
 
     @Test
@@ -243,6 +250,7 @@ class AssignmentServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT));
         verify(assignmentRepository, never()).delete(any());
+        verify(attachmentCleanup, never()).deleteAllForAssignment(any());
     }
 
     private Member member(MemberRole role) {

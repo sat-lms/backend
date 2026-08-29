@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sat.lms.assignment.service.AssignmentService;
 import com.sat.lms.global.security.JwtTokenProvider;
 import com.sat.lms.global.storage.FileStorage;
+import com.sat.lms.global.storage.StoredFile;
 import jakarta.persistence.EntityManagerFactory;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -31,9 +33,17 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -121,6 +131,8 @@ class AssignmentPostgreSqlIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
         assertThat(OffsetDateTime.parse(objectMapper.readTree(detailBody).path("data").path("dueAt").asText())
                 .toInstant()).isEqualTo(expectedInstant);
+        assertThat(objectMapper.readTree(detailBody).path("data").path("attachments").isArray()).isTrue();
+        assertThat(objectMapper.readTree(detailBody).path("data").path("attachments")).isEmpty();
     }
 
     @Test
@@ -304,12 +316,19 @@ class AssignmentPostgreSqlIntegrationTest {
                 INSERT INTO submission (assignment_id, student_id, text_content, is_late, created_at, updated_at)
                 VALUES (?, ?, '제출', false, now(), now())
                 """, assignmentId, studentId);
+        String attachmentKey = "assignments/" + assignmentId + "/protected.pdf";
+        Long attachmentId = insertAssignmentAttachment(assignmentId, attachmentKey);
 
         mockMvc.perform(delete("/api/v1/assignments/{id}", assignmentId)
                         .header("Authorization", "Bearer " + token(adminId, "ADMIN")))
                 .andExpect(status().isConflict());
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM assignment WHERE id = ?",
                 Long.class, assignmentId)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM assignment_attachment WHERE attachment_id = ?",
+                Long.class, attachmentId)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment WHERE id = ?",
+                Long.class, attachmentId)).isEqualTo(1L);
+        verify(fileStorage, never()).delete(attachmentKey);
     }
 
     @Test
@@ -332,6 +351,206 @@ class AssignmentPostgreSqlIntegrationTest {
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(3L);
     }
 
+    @Test
+    void assignmentAttachmentUploadPersistsRowsAndDetailUsesOneAttachmentQuery() throws Exception {
+        Long adminId = insertMember("ADMIN");
+        Long studentId = insertMember("STUDENT");
+        Long assignmentId = insertAssignment(adminId, "첨부 과제", "2026-09-10T00:00:00Z",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z");
+        String firstStored = "11111111-1111-1111-1111-111111111111.pdf";
+        String secondStored = "22222222-2222-2222-2222-222222222222.hwpx";
+        when(fileStorage.upload(any(), eq("assignments/" + assignmentId))).thenReturn(
+                new StoredFile("안내.PDF", firstStored, "assignments/" + assignmentId + "/" + firstStored,
+                        "pdf", 1L),
+                new StoredFile("서식.HWPX", secondStored, "assignments/" + assignmentId + "/" + secondStored,
+                        "hwpx", 2L));
+
+        mockMvc.perform(multipart("/api/v1/assignments/{id}/attachments", assignmentId)
+                        .file(multipartFile("안내.PDF", "첫 파일"))
+                        .file(multipartFile("서식.HWPX", "두 번째 파일"))
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN"))
+                        .characterEncoding(StandardCharsets.UTF_8))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].storageKey").doesNotExist())
+                .andExpect(jsonPath("$.data[0].storedName").doesNotExist());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM assignment_attachment WHERE assignment_id = ?",
+                Long.class, assignmentId)).isEqualTo(2L);
+        Map<String, Object> metadata = jdbcTemplate.queryForMap(
+                "SELECT original_name, stored_name, storage_key, extension, size_kb FROM attachment ORDER BY id LIMIT 1");
+        assertThat(metadata.get("original_name")).isEqualTo("안내.PDF");
+        assertThat(metadata.get("stored_name")).isEqualTo(firstStored);
+        assertThat(metadata.get("storage_key")).isEqualTo("assignments/" + assignmentId + "/" + firstStored);
+        assertThat(metadata.get("extension")).isEqualTo("pdf");
+
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+        mockMvc.perform(get("/api/v1/assignments/{id}", assignmentId)
+                        .header("Authorization", "Bearer " + token(studentId, "STUDENT")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachments.length()").value(2))
+                .andExpect(jsonPath("$.data.attachments[0].originalName").value("안내.PDF"))
+                .andExpect(jsonPath("$.data.attachments[0].storageKey").doesNotExist())
+                .andExpect(jsonPath("$.data.attachments[0].storedName").doesNotExist())
+                .andExpect(jsonPath("$.data.attachments[0].downloadUrl").doesNotExist());
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(3L);
+    }
+
+    @Test
+    void cumulativeLimitRejectsTwoPlusTwoAndAllowsTwoPlusOne() throws Exception {
+        Long adminId = insertMember("ADMIN");
+        Long assignmentId = insertAssignment(adminId, "누적 과제", "2026-09-10T00:00:00Z",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z");
+        insertAssignmentAttachment(assignmentId, "assignments/" + assignmentId + "/existing-a.pdf");
+        insertAssignmentAttachment(assignmentId, "assignments/" + assignmentId + "/existing-b.pdf");
+
+        mockMvc.perform(multipart("/api/v1/assignments/{id}/attachments", assignmentId)
+                        .file(multipartFile("new-a.pdf", "a")).file(multipartFile("new-b.pdf", "b"))
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("과제 첨부파일은 최대 3개까지 등록할 수 있습니다."));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isEqualTo(2L);
+        verify(fileStorage, never()).upload(any(), anyString());
+
+        String stored = "33333333-3333-3333-3333-333333333333.pdf";
+        when(fileStorage.upload(any(), eq("assignments/" + assignmentId))).thenReturn(new StoredFile(
+                "new.pdf", stored, "assignments/" + assignmentId + "/" + stored, "pdf", 1L));
+        mockMvc.perform(multipart("/api/v1/assignments/{id}/attachments", assignmentId)
+                        .file(multipartFile("new.pdf", "new"))
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN")))
+                .andExpect(status().isCreated());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM assignment_attachment WHERE assignment_id = ?",
+                Long.class, assignmentId)).isEqualTo(3L);
+    }
+
+    @Test
+    void assignmentAttachmentDatabaseFailureRollsBackRowsAndCompensatesStorage() throws Exception {
+        Long adminId = insertMember("ADMIN");
+        Long assignmentId = insertAssignment(adminId, "업로드 롤백", "2026-09-10T00:00:00Z",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z");
+        String stored = "44444444-4444-4444-4444-444444444444.pdf";
+        String key = "assignments/" + assignmentId + "/" + stored;
+        when(fileStorage.upload(any(), eq("assignments/" + assignmentId))).thenReturn(
+                new StoredFile("a.pdf", stored, key, "pdf", 1L),
+                new StoredFile("b.pdf", stored, key, "pdf", 1L));
+
+        mockMvc.perform(multipart("/api/v1/assignments/{id}/attachments", assignmentId)
+                        .file(multipartFile("a.pdf", "a")).file(multipartFile("b.pdf", "b"))
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN")))
+                .andExpect(status().isConflict());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment", Long.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM assignment_attachment", Long.class)).isZero();
+        org.mockito.Mockito.verify(fileStorage, org.mockito.Mockito.times(2)).delete(key);
+    }
+
+    @Test
+    void downloadRejectsNoticeAttachmentAndNormalDeleteRunsAfterCommit() throws Exception {
+        Long adminId = insertMember("ADMIN");
+        Long studentId = insertMember("STUDENT");
+        Long assignmentId = insertAssignment(adminId, "다운로드 과제", "2026-09-10T00:00:00Z",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z");
+        Long attachmentId = insertAssignmentAttachment(assignmentId,
+                "assignments/" + assignmentId + "/normal.pdf");
+        Long noticeId = jdbcTemplate.queryForObject("""
+                INSERT INTO notice (admin_id, title, content, is_pinned, created_at, updated_at)
+                VALUES (?, '공지', '내용', false, now(), now()) RETURNING id
+                """, Long.class, adminId);
+        Long noticeAttachmentId = insertAttachment("notices/" + noticeId + "/notice.pdf");
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?)",
+                noticeId, noticeAttachmentId);
+        Long submissionId = jdbcTemplate.queryForObject("""
+                INSERT INTO submission (assignment_id, student_id, text_content, is_late, created_at, updated_at)
+                VALUES (?, ?, '제출', false, now(), now()) RETURNING id
+                """, Long.class, assignmentId, studentId);
+        Long submissionAttachmentId = insertAttachment("submissions/" + submissionId + "/submission.pdf");
+        jdbcTemplate.update("INSERT INTO submission_attachment (submission_id, attachment_id) VALUES (?, ?)",
+                submissionId, submissionAttachmentId);
+
+        mockMvc.perform(get("/api/v1/assignment-attachments/{id}/download-url", noticeAttachmentId)
+                        .header("Authorization", "Bearer " + token(studentId, "STUDENT")))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/assignment-attachments/{id}/download-url", submissionAttachmentId)
+                        .header("Authorization", "Bearer " + token(studentId, "STUDENT")))
+                .andExpect(status().isNotFound());
+        verify(fileStorage, never()).createDownloadUrl(anyString());
+
+        mockMvc.perform(delete("/api/v1/assignment-attachments/{id}", attachmentId)
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN")))
+                .andExpect(status().isOk());
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment WHERE id = ?",
+                Long.class, attachmentId)).isZero();
+        verify(fileStorage).delete("assignments/" + assignmentId + "/normal.pdf");
+    }
+
+    @Test
+    void deletingAssignmentCleansUnsharedAttachmentsButProtectsSharedOnes() throws Exception {
+        Long adminId = insertMember("ADMIN");
+        Long assignmentId = insertAssignment(adminId, "삭제 과제", "2026-09-10T00:00:00Z",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z");
+        String unsharedKey = "assignments/" + assignmentId + "/unshared.pdf";
+        String sharedKey = "assignments/" + assignmentId + "/shared.pdf";
+        Long unsharedId = insertAssignmentAttachment(assignmentId, unsharedKey);
+        Long sharedId = insertAssignmentAttachment(assignmentId, sharedKey);
+        Long noticeId = jdbcTemplate.queryForObject("""
+                INSERT INTO notice (admin_id, title, content, is_pinned, created_at, updated_at)
+                VALUES (?, '공유 공지', '내용', false, now(), now()) RETURNING id
+                """, Long.class, adminId);
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?)",
+                noticeId, sharedId);
+
+        mockMvc.perform(delete("/api/v1/assignments/{id}", assignmentId)
+                        .header("Authorization", "Bearer " + token(adminId, "ADMIN")))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM assignment WHERE id = ?",
+                Long.class, assignmentId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment WHERE id = ?",
+                Long.class, unsharedId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment WHERE id = ?",
+                Long.class, sharedId)).isEqualTo(1L);
+        verify(fileStorage).delete(unsharedKey);
+        verify(fileStorage, never()).delete(sharedKey);
+    }
+
+    @Test
+    void assignmentDeleteDatabaseFailureRollsBackAllRowsAndStorage() throws Exception {
+        Long adminId = insertMember("ADMIN");
+        Long assignmentId = insertAssignment(adminId, "롤백 과제", "2026-09-10T00:00:00Z",
+                "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z");
+        String key = "assignments/" + assignmentId + "/rollback.pdf";
+        Long attachmentId = insertAssignmentAttachment(assignmentId, key);
+        jdbcTemplate.execute("""
+                CREATE FUNCTION fail_assignment_attachment_delete() RETURNS trigger AS $$
+                BEGIN RAISE EXCEPTION 'forced delete failure'; END;
+                $$ LANGUAGE plpgsql
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER trg_fail_assignment_attachment_delete
+                BEFORE DELETE ON assignment_attachment
+                FOR EACH ROW EXECUTE FUNCTION fail_assignment_attachment_delete()
+                """);
+        try {
+            mockMvc.perform(delete("/api/v1/assignments/{id}", assignmentId)
+                            .header("Authorization", "Bearer " + token(adminId, "ADMIN")))
+                    .andExpect(status().is5xxServerError());
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM assignment WHERE id = ?",
+                    Long.class, assignmentId)).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM assignment_attachment WHERE attachment_id = ?",
+                    Long.class, attachmentId)).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM attachment WHERE id = ?",
+                    Long.class, attachmentId)).isEqualTo(1L);
+            verify(fileStorage, never()).delete(key);
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_fail_assignment_attachment_delete ON assignment_attachment");
+            jdbcTemplate.execute("DROP FUNCTION IF EXISTS fail_assignment_attachment_delete()");
+        }
+    }
+
     private Long insertMember(String role) {
         int sequence = memberSequence.incrementAndGet();
         return jdbcTemplate.queryForObject("""
@@ -346,6 +565,25 @@ class AssignmentPostgreSqlIntegrationTest {
                                         created_at, updated_at)
                 VALUES (?, ?, '내용', ?::timestamptz, false, ?::timestamptz, ?::timestamptz) RETURNING id
                 """, Long.class, adminId, title, dueAt, createdAt, updatedAt);
+    }
+
+    private Long insertAssignmentAttachment(Long assignmentId, String storageKey) {
+        Long attachmentId = insertAttachment(storageKey);
+        jdbcTemplate.update("INSERT INTO assignment_attachment (assignment_id, attachment_id) VALUES (?, ?)",
+                assignmentId, attachmentId);
+        return attachmentId;
+    }
+
+    private Long insertAttachment(String storageKey) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO attachment (original_name, stored_name, storage_key, extension, size_kb, created_at)
+                VALUES ('original.pdf', 'stored.pdf', ?, 'pdf', 1, now()) RETURNING id
+                """, Long.class, storageKey);
+    }
+
+    private MockMultipartFile multipartFile(String originalName, String content) {
+        return new MockMultipartFile("files", originalName, "application/octet-stream",
+                content.getBytes(StandardCharsets.UTF_8));
     }
 
     private String token(Long memberId, String role) {
