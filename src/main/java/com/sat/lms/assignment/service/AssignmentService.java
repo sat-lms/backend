@@ -14,6 +14,7 @@ import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -62,9 +63,10 @@ public class AssignmentService {
         return AssignmentDetailResponse.from(assignmentRepository.save(assignment));
     }
 
-    public Page<AssignmentListResponse> getAssignments(Long memberId, int page, int size, String sort) {
+    public Page<AssignmentListResponse> getAssignments(Long memberId, Pageable pageable) {
         requireMember(memberId);
-        return assignmentRepository.findAssignmentPage(PageRequest.of(page, size, parseSort(sort)));
+        return assignmentRepository.findAssignmentPage(PageRequest.of(
+                pageable.getPageNumber(), pageable.getPageSize(), validateSort(pageable.getSort())));
     }
 
     public AssignmentDetailResponse getAssignment(Long assignmentId, Long memberId) {
@@ -105,23 +107,18 @@ public class AssignmentService {
         assignmentRepository.flush();
     }
 
-    private Sort parseSort(String value) {
-        if (value == null || value.isBlank()) {
+    private Sort validateSort(Sort requestedSort) {
+        if (requestedSort.isUnsorted()) {
             return Sort.by(Sort.Direction.ASC, "dueAt").and(Sort.by(Sort.Direction.ASC, "id"));
         }
-        String[] parts = value.split(",", -1);
-        if (parts.length > 2 || parts[0].isBlank() || !ALLOWED_SORT_FIELDS.contains(parts[0])) {
+        if (requestedSort.stream().count() != 1) {
             throw invalidSort();
         }
-        Sort.Direction direction = Sort.Direction.DESC;
-        if (parts.length == 2) {
-            try {
-                direction = Sort.Direction.fromString(parts[1]);
-            } catch (IllegalArgumentException e) {
-                throw invalidSort();
-            }
+        Sort.Order order = requestedSort.iterator().next();
+        if (!ALLOWED_SORT_FIELDS.contains(order.getProperty())) {
+            throw invalidSort();
         }
-        return Sort.by(direction, parts[0]).and(Sort.by(direction, "id"));
+        return Sort.by(order).and(Sort.by(order.getDirection(), "id"));
     }
 
     private void validateUpdate(AssignmentUpdateRequest request) {

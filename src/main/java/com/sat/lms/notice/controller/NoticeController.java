@@ -9,11 +9,13 @@ import com.sat.lms.notice.dto.NoticeUpdateRequest;
 import com.sat.lms.notice.dto.UnreadCountResponse;
 import com.sat.lms.notice.service.NoticeService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.Parameters;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Min;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
@@ -38,15 +40,19 @@ public class NoticeController {
 
     public NoticeController(NoticeService noticeService) { this.noticeService = noticeService; }
 
-    @Operation(summary = "공지 목록 조회")
+    @Operation(summary = "공지 목록 조회",
+            description = "고정 공지 우선, 같은 고정 상태에서는 최신 작성순으로 정렬되며 클라이언트 정렬은 적용되지 않습니다.")
+    @Parameters({
+            @Parameter(name = "page", description = "페이지 번호(0부터 시작)", example = "0"),
+            @Parameter(name = "size", description = "페이지 크기", example = "20")
+    })
     @GetMapping
     public ApiResponse<PageResponse<NoticeListResponse>> getNotices(
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) int size,
+            @Parameter(hidden = true) @PageableDefault(size = 20) Pageable pageable,
             @RequestParam(defaultValue = "false") boolean unreadOnly,
             @AuthenticationPrincipal Long memberId) {
         return ApiResponse.success("공지사항 목록을 조회했습니다.",
-                PageResponse.from(noticeService.getNotices(memberId, unreadOnly, PageRequest.of(page, size))));
+                PageResponse.from(noticeService.getNotices(memberId, unreadOnly, pageable)));
     }
 
     @Operation(summary = "미읽음 공지 개수 조회")

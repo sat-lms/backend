@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 
 import java.time.OffsetDateTime;
@@ -53,13 +54,14 @@ class NoticeServiceTest {
 
     @Test
     void listUsesSinglePagedReadJoinQueryAndPreservesReadFlags() {
+        PageRequest requested = PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "title"));
         PageRequest pageable = PageRequest.of(0, 20);
         List<NoticeListResponse> content = List.of(
                 new NoticeListResponse(1L, "고정", true, OffsetDateTime.now(), "관리자", false),
                 new NoticeListResponse(2L, "일반", false, OffsetDateTime.now().minusDays(1), "관리자", true));
         when(noticeRepository.findNoticePage(3L, false, pageable)).thenReturn(new PageImpl<>(content));
 
-        var result = service.getNotices(3L, false, pageable);
+        var result = service.getNotices(3L, false, requested);
 
         assertThat(result.getContent()).extracting(NoticeListResponse::getIsRead).containsExactly(false, true);
         verify(noticeRepository).findNoticePage(3L, false, pageable);

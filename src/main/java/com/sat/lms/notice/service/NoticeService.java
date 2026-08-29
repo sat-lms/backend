@@ -14,6 +14,7 @@ import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.repository.MemberRepository;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -44,7 +45,8 @@ public class NoticeService {
     }
 
     public Page<NoticeListResponse> getNotices(Long memberId, boolean unreadOnly, Pageable pageable) {
-        return noticeRepository.findNoticePage(memberId, unreadOnly, pageable);
+        Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+        return noticeRepository.findNoticePage(memberId, unreadOnly, unsorted);
     }
 
     public UnreadCountResponse getUnreadCount(Long memberId) {

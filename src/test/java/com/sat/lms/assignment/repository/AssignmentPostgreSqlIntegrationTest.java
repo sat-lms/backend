@@ -283,6 +283,18 @@ class AssignmentPostgreSqlIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content[0].title").value("B"));
+        mockMvc.perform(get("/api/v1/assignments?sort=dueAt")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].title").value("B"));
+        mockMvc.perform(get("/api/v1/assignments?sort=dueAt,ASC")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].title").value("B"));
+        mockMvc.perform(get("/api/v1/assignments?sort=")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].title").value("B"));
         mockMvc.perform(get("/api/v1/assignments?sort=updatedAt,desc")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())

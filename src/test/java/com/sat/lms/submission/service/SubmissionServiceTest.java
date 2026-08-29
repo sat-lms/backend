@@ -25,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -406,6 +407,7 @@ class SubmissionServiceTest {
                 OffsetDateTime.now(), OffsetDateTime.now());
         SubmissionListResponse withoutFile = new SubmissionListResponse(20L, 2L, "과제2", "내용2", true,
                 OffsetDateTime.now(), OffsetDateTime.now());
+        Pageable requested = PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "title"));
         Pageable pageable = PageRequest.of(0, 20);
         Page<SubmissionListResponse> page = new PageImpl<>(List.of(withFile, withoutFile), pageable, 2);
         when(submissionRepository.findSubmissionPageByStudentId(3L, pageable)).thenReturn(page);
@@ -414,7 +416,7 @@ class SubmissionServiceTest {
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionIdIn(List.of(10L, 20L)))
                 .thenReturn(List.of(link));
 
-        Page<SubmissionListResponse> result = service.getMySubmissions(3L, pageable);
+        Page<SubmissionListResponse> result = service.getMySubmissions(3L, requested);
 
         assertThat(result.getContent()).hasSize(2);
         assertThat(result.getContent().get(0).getAttachments()).extracting(SubmissionFileResponse::getOriginalName)

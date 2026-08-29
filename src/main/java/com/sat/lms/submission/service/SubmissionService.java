@@ -24,6 +24,7 @@ import com.sat.lms.submission.repository.SubmissionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -212,7 +213,8 @@ public class SubmissionService {
 
     public Page<SubmissionListResponse> getMySubmissions(Long memberId, Pageable pageable) {
         requireStudent(memberId);
-        Page<SubmissionListResponse> page = submissionRepository.findSubmissionPageByStudentId(memberId, pageable);
+        Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+        Page<SubmissionListResponse> page = submissionRepository.findSubmissionPageByStudentId(memberId, unsorted);
         if (page.isEmpty()) {
             return page;
         }

@@ -9,6 +9,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,7 +34,7 @@ public class AdminSubmissionController {
     public ApiResponse<AdminSubmissionSummaryResponse> getSubmissionStatus(
             @PathVariable Long assignmentId,
             @RequestParam(required = false) SubmissionStatusFilter status,
-            Pageable pageable,
+            @ParameterObject @PageableDefault(size = 20) Pageable pageable,
             @AuthenticationPrincipal Long memberId) {
         return ApiResponse.success("과제별 제출 현황을 조회했습니다.",
                 adminSubmissionService.getSubmissionStatus(assignmentId, status, pageable, memberId));
