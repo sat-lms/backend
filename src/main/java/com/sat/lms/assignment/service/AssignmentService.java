@@ -9,8 +9,7 @@ import com.sat.lms.assignment.repository.AssignmentRepository;
 import com.sat.lms.attachment.repository.AssignmentAttachmentRepository;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.Member;
-import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -35,20 +34,20 @@ public class AssignmentService {
 
     private final AssignmentRepository assignmentRepository;
     private final SubmissionRepository submissionRepository;
-    private final MemberRepository memberRepository;
+    private final MemberGuard memberGuard;
     private final Clock clock;
     private final AssignmentAttachmentRepository assignmentAttachmentRepository;
     private final AssignmentAttachmentCleanup attachmentCleanup;
 
     public AssignmentService(AssignmentRepository assignmentRepository,
                              SubmissionRepository submissionRepository,
-                             MemberRepository memberRepository,
+                             MemberGuard memberGuard,
                              Clock clock,
                              AssignmentAttachmentRepository assignmentAttachmentRepository,
                              AssignmentAttachmentCleanup attachmentCleanup) {
         this.assignmentRepository = assignmentRepository;
         this.submissionRepository = submissionRepository;
-        this.memberRepository = memberRepository;
+        this.memberGuard = memberGuard;
         this.clock = clock;
         this.assignmentAttachmentRepository = assignmentAttachmentRepository;
         this.attachmentCleanup = attachmentCleanup;
@@ -56,7 +55,7 @@ public class AssignmentService {
 
     @Transactional
     public AssignmentDetailResponse create(AssignmentCreateRequest request, Long memberId) {
-        Member admin = requireAdmin(memberId);
+        Member admin = memberGuard.requireAdmin(memberId);
         OffsetDateTime dueAt = validateAndConvertDueAt(request.getDueAt(), "마감 시각은 필수입니다.");
         Assignment assignment = Assignment.create(admin, request.getTitle().trim(), request.getContent().trim(),
                 dueAt, request.getAllowLateSubmission());
@@ -64,13 +63,13 @@ public class AssignmentService {
     }
 
     public Page<AssignmentListResponse> getAssignments(Long memberId, Pageable pageable) {
-        requireMember(memberId);
+        memberGuard.requireMember(memberId);
         return assignmentRepository.findAssignmentPage(PageRequest.of(
                 pageable.getPageNumber(), pageable.getPageSize(), validateSort(pageable.getSort())));
     }
 
     public AssignmentDetailResponse getAssignment(Long assignmentId, Long memberId) {
-        requireMember(memberId);
+        memberGuard.requireMember(memberId);
         Assignment assignment = findAssignment(assignmentId);
         return AssignmentDetailResponse.from(assignment,
                 assignmentAttachmentRepository.findWithAttachmentByAssignmentId(assignmentId));
@@ -78,7 +77,7 @@ public class AssignmentService {
 
     @Transactional
     public AssignmentDetailResponse update(Long assignmentId, AssignmentUpdateRequest request, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         validateUpdate(request);
         OffsetDateTime dueAt = request.isDueAtPresent()
                 ? validateAndConvertDueAt(request.getDueAt(), "마감 시각은 null일 수 없습니다.")
@@ -96,7 +95,7 @@ public class AssignmentService {
 
     @Transactional
     public void delete(Long assignmentId, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         Assignment assignment = assignmentRepository.findByIdForUpdate(assignmentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
         if (submissionRepository.existsByAssignmentId(assignmentId)) {
@@ -151,19 +150,6 @@ public class AssignmentService {
     private Assignment findAssignment(Long assignmentId) {
         return assignmentRepository.findById(assignmentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
-    }
-
-    private Member requireMember(Long memberId) {
-        return memberRepository.findById(memberId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
-    }
-
-    private Member requireAdmin(Long memberId) {
-        Member member = requireMember(memberId);
-        if (member.getRole() != MemberRole.ADMIN) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다.");
-        }
-        return member;
     }
 
     private BusinessException invalidSort() {
