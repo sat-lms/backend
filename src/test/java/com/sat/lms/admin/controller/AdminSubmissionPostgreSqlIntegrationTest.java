@@ -179,6 +179,20 @@ class AdminSubmissionPostgreSqlIntegrationTest {
     }
 
     @Test
+    void invalidSortFieldIsIgnoredInsteadOfCausingServerError() throws Exception {
+        // findStudentSubmissionStatusPage()의 JPQL은 order by m.studentNumber asc가 고정돼 있어,
+        // 존재하지 않는 정렬 필드를 그대로 raw JPQL에 실어 보내면 500이 나던 문제(#32)의 회귀 테스트.
+        Long adminId = insertMember("admin09", "관리자", "ADMIN", "APPROVED");
+        String adminToken = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+        Long assignmentId = insertAssignment(adminId);
+
+        mockMvc.perform(get("/api/v1/admin/assignments/{assignmentId}/submissions", assignmentId)
+                        .param("sort", "nonexistentField")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void nonApprovedStudentsAreExcludedFromAggregation() throws Exception {
         Long adminId = insertMember("admin03", "관리자", "ADMIN", "APPROVED");
         String adminToken = jwtTokenProvider.createAccessToken(adminId, "ADMIN");

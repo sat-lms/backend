@@ -21,6 +21,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 
 import java.time.OffsetDateTime;
@@ -90,6 +91,25 @@ class AdminSubmissionServiceTest {
         service.getSubmissionStatus(1L, SubmissionStatusFilter.LATE, pageable, 7L);
 
         verify(memberRepository).findStudentSubmissionStatusPage(1L, "LATE", pageable);
+    }
+
+    @Test
+    void getSubmissionStatusStripsRequestedSortBeforeQueryingRawJpql() {
+        // findStudentSubmissionStatusPage()의 JPQL은 order by m.studentNumber asc가 고정돼 있어,
+        // 존재하지 않는 정렬 필드가 Pageable에 실려서 그대로 전달되면 500을 유발할 수 있다(#32).
+        Member admin = admin(7L);
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
+        when(assignmentRepository.existsById(1L)).thenReturn(true);
+        when(memberRepository.countSubmissionStatusByAssignmentId(1L))
+                .thenReturn(new AdminAssignmentSubmissionCounts(0L, 0L, 0L));
+        Pageable requested = PageRequest.of(0, 20, Sort.by("nonexistentField"));
+        Pageable expectedUnsorted = PageRequest.of(0, 20);
+        when(memberRepository.findStudentSubmissionStatusPage(1L, null, expectedUnsorted))
+                .thenReturn(new PageImpl<>(List.of(), expectedUnsorted, 0));
+
+        service.getSubmissionStatus(1L, null, requested, 7L);
+
+        verify(memberRepository).findStudentSubmissionStatusPage(1L, null, expectedUnsorted);
     }
 
     @Test

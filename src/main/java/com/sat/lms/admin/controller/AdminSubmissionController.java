@@ -6,11 +6,12 @@ import com.sat.lms.submission.dto.AdminSubmissionDetailResponse;
 import com.sat.lms.submission.dto.AdminSubmissionSummaryResponse;
 import com.sat.lms.submission.dto.SubmissionStatusFilter;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.Parameters;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
-import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,12 +30,17 @@ public class AdminSubmissionController {
         this.adminSubmissionService = adminSubmissionService;
     }
 
-    @Operation(summary = "과제별 전체 제출 현황 조회")
+    @Operation(summary = "과제별 전체 제출 현황 조회",
+            description = "학번 오름차순으로 고정 정렬되며 클라이언트 정렬은 적용되지 않습니다.")
+    @Parameters({
+            @Parameter(name = "page", description = "페이지 번호(0부터 시작)", example = "0"),
+            @Parameter(name = "size", description = "페이지 크기", example = "20")
+    })
     @GetMapping("/assignments/{assignmentId}/submissions")
     public ApiResponse<AdminSubmissionSummaryResponse> getSubmissionStatus(
             @PathVariable Long assignmentId,
             @RequestParam(required = false) SubmissionStatusFilter status,
-            @ParameterObject @PageableDefault(size = 20) Pageable pageable,
+            @Parameter(hidden = true) @PageableDefault(size = 20) Pageable pageable,
             @AuthenticationPrincipal Long memberId) {
         return ApiResponse.success("과제별 제출 현황을 조회했습니다.",
                 adminSubmissionService.getSubmissionStatus(assignmentId, status, pageable, memberId));

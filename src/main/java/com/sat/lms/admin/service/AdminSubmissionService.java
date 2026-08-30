@@ -16,6 +16,7 @@ import com.sat.lms.submission.dto.SubmissionStatusFilter;
 import com.sat.lms.submission.entity.Submission;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -50,8 +51,12 @@ public class AdminSubmissionService {
 
         AdminAssignmentSubmissionCounts counts = memberRepository.countSubmissionStatusByAssignmentId(assignmentId);
         String statusName = status == null ? null : status.name();
+        // findStudentSubmissionStatusPage()의 JPQL에 order by m.studentNumber asc가 고정돼 있으므로,
+        // Pageable의 sort는 raw JPQL에 그대로 얹히면 존재하지 않는 필드에 대해 500을 유발할 수 있어
+        // page/size만 남기고 버린다 (NoticeService.getNotices()와 동일한 방어 패턴).
+        Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
         Page<AdminSubmissionStudentRow> students = memberRepository
-                .findStudentSubmissionStatusPage(assignmentId, statusName, pageable);
+                .findStudentSubmissionStatusPage(assignmentId, statusName, unsorted);
 
         return new AdminSubmissionSummaryResponse(counts.getSubmittedCount(), counts.getNotSubmittedCount(),
                 counts.getLateCount(), PageResponse.from(students));
