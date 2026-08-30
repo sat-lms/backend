@@ -11,8 +11,7 @@ import com.sat.lms.notice.repository.NoticeReadRepository;
 import com.sat.lms.notice.repository.NoticeRepository;
 import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
 import com.sat.lms.member.entity.Member;
-import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -30,16 +29,16 @@ import static com.sat.lms.notice.entity.Notice.TITLE_MAX_LENGTH;
 public class NoticeService {
     private final NoticeRepository noticeRepository;
     private final NoticeReadRepository noticeReadRepository;
-    private final MemberRepository memberRepository;
+    private final MemberGuard memberGuard;
     private final NoticeAttachmentCleanup attachmentCleanup;
     private final NoticeAttachmentRepository noticeAttachmentRepository;
 
     public NoticeService(NoticeRepository noticeRepository, NoticeReadRepository noticeReadRepository,
-                         MemberRepository memberRepository, NoticeAttachmentCleanup attachmentCleanup,
+                         MemberGuard memberGuard, NoticeAttachmentCleanup attachmentCleanup,
                          NoticeAttachmentRepository noticeAttachmentRepository) {
         this.noticeRepository = noticeRepository;
         this.noticeReadRepository = noticeReadRepository;
-        this.memberRepository = memberRepository;
+        this.memberGuard = memberGuard;
         this.attachmentCleanup = attachmentCleanup;
         this.noticeAttachmentRepository = noticeAttachmentRepository;
     }
@@ -58,7 +57,7 @@ public class NoticeService {
     @Transactional
     public NoticeDetailResponse getNotice(Long noticeId, Long memberId) {
         Notice notice = getNoticeWithAdmin(noticeId);
-        requireMember(memberId);
+        memberGuard.requireMember(memberId);
         noticeReadRepository.insertIfAbsent(noticeId, memberId, OffsetDateTime.now(ZoneOffset.UTC));
         return NoticeDetailResponse.from(notice, true,
                 noticeAttachmentRepository.findWithAttachmentByNoticeId(noticeId));
@@ -66,7 +65,7 @@ public class NoticeService {
 
     @Transactional
     public NoticeDetailResponse create(NoticeCreateRequest request, Long memberId) {
-        Member admin = requireAdmin(memberId);
+        Member admin = memberGuard.requireAdmin(memberId);
         Notice notice = Notice.create(admin, request.getTitle().trim(), request.getContent().trim(),
                 Boolean.TRUE.equals(request.getIsPinned()));
         return NoticeDetailResponse.from(noticeRepository.save(notice), false);
@@ -74,7 +73,7 @@ public class NoticeService {
 
     @Transactional
     public NoticeDetailResponse update(Long noticeId, NoticeUpdateRequest request, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         validateUpdate(request);
         Notice notice = getNoticeWithAdmin(noticeId);
         String title = request.isTitlePresent() ? request.getTitle().trim() : null;
@@ -89,7 +88,7 @@ public class NoticeService {
 
     @Transactional
     public void delete(Long noticeId, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         Notice notice = noticeRepository.findByIdForUpdate(noticeId)
                 .orElseThrow(this::noticeNotFound);
         attachmentCleanup.deleteAllForNotice(noticeId);
@@ -113,19 +112,6 @@ public class NoticeService {
 
     private Notice getNoticeWithAdmin(Long noticeId) {
         return noticeRepository.findWithAdminById(noticeId).orElseThrow(this::noticeNotFound);
-    }
-
-    private Member requireMember(Long memberId) {
-        return memberRepository.findById(memberId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
-    }
-
-    private Member requireAdmin(Long memberId) {
-        Member member = requireMember(memberId);
-        if (member.getRole() != MemberRole.ADMIN) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다.");
-        }
-        return member;
     }
 
     private BusinessException noticeNotFound() {

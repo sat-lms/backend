@@ -13,7 +13,7 @@ import com.sat.lms.global.storage.FileExtensionExtractor;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.submission.dto.SubmissionAttachmentDownloadUrlResponse;
 import com.sat.lms.submission.dto.SubmissionCreateRequest;
 import com.sat.lms.submission.dto.SubmissionDetailResponse;
@@ -61,19 +61,19 @@ public class SubmissionService {
 
     private final SubmissionRepository submissionRepository;
     private final AssignmentRepository assignmentRepository;
-    private final MemberRepository memberRepository;
+    private final MemberGuard memberGuard;
     private final AttachmentRepository attachmentRepository;
     private final SubmissionAttachmentRepository submissionAttachmentRepository;
     private final FileStorage fileStorage;
     private final Clock clock;
 
     public SubmissionService(SubmissionRepository submissionRepository, AssignmentRepository assignmentRepository,
-                             MemberRepository memberRepository, AttachmentRepository attachmentRepository,
+                             MemberGuard memberGuard, AttachmentRepository attachmentRepository,
                              SubmissionAttachmentRepository submissionAttachmentRepository, FileStorage fileStorage,
                              Clock clock) {
         this.submissionRepository = submissionRepository;
         this.assignmentRepository = assignmentRepository;
-        this.memberRepository = memberRepository;
+        this.memberGuard = memberGuard;
         this.attachmentRepository = attachmentRepository;
         this.submissionAttachmentRepository = submissionAttachmentRepository;
         this.fileStorage = fileStorage;
@@ -81,7 +81,7 @@ public class SubmissionService {
     }
 
     public SubmissionDetailResponse getMySubmission(Long assignmentId, Long memberId) {
-        requireStudent(memberId);
+        memberGuard.requireStudent(memberId);
         Submission submission = submissionRepository.findByAssignmentIdAndStudentId(assignmentId, memberId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_SUBMISSION_MESSAGE));
         List<Attachment> attachments = submissionAttachmentRepository
@@ -94,7 +94,7 @@ public class SubmissionService {
     @Transactional
     public SubmissionDetailResponse submit(Long assignmentId, Long memberId, SubmissionCreateRequest request,
                                            List<MultipartFile> files) {
-        Member student = requireStudent(memberId);
+        Member student = memberGuard.requireStudent(memberId);
         Assignment assignment = requireAssignment(assignmentId);
 
         String textContent = normalizeText(request);
@@ -137,7 +137,7 @@ public class SubmissionService {
     @Transactional
     public SubmissionDetailResponse resubmit(Long assignmentId, Long memberId, SubmissionCreateRequest request,
                                              List<MultipartFile> files) {
-        requireStudent(memberId);
+        memberGuard.requireStudent(memberId);
         Assignment assignment = requireAssignment(assignmentId);
         Submission submission = submissionRepository.findByAssignmentIdAndStudentId(assignmentId, memberId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_SUBMISSION_MESSAGE));
@@ -192,7 +192,7 @@ public class SubmissionService {
 
     @Transactional
     public void deleteSubmission(Long assignmentId, Long memberId) {
-        requireStudent(memberId);
+        memberGuard.requireStudent(memberId);
         Submission submission = submissionRepository.findByAssignmentIdAndStudentId(assignmentId, memberId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_SUBMISSION_MESSAGE));
 
@@ -212,7 +212,7 @@ public class SubmissionService {
     }
 
     public Page<SubmissionListResponse> getMySubmissions(Long memberId, Pageable pageable) {
-        requireStudent(memberId);
+        memberGuard.requireStudent(memberId);
         Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
         Page<SubmissionListResponse> page = submissionRepository.findSubmissionPageByStudentId(memberId, unsorted);
         if (page.isEmpty()) {
@@ -233,7 +233,7 @@ public class SubmissionService {
     }
 
     public SubmissionAttachmentDownloadUrlResponse getDownloadUrl(Long attachmentId, Long memberId) {
-        Member requester = requireMember(memberId);
+        Member requester = memberGuard.requireMember(memberId);
         SubmissionAttachment link = submissionAttachmentRepository
                 .findWithSubmissionAndAttachmentByAttachmentId(attachmentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_ATTACHMENT_MESSAGE));
@@ -247,7 +247,7 @@ public class SubmissionService {
 
     @Transactional
     public void deleteAttachment(Long attachmentId, Long memberId) {
-        Member requester = requireStudent(memberId);
+        Member requester = memberGuard.requireStudent(memberId);
         SubmissionAttachment link = submissionAttachmentRepository
                 .findWithSubmissionAndAttachmentByAttachmentId(attachmentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_ATTACHMENT_MESSAGE));
@@ -373,19 +373,6 @@ public class SubmissionService {
     private Assignment requireAssignment(Long assignmentId) {
         return assignmentRepository.findById(assignmentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
-    }
-
-    private Member requireMember(Long memberId) {
-        return memberRepository.findById(memberId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
-    }
-
-    private Member requireStudent(Long memberId) {
-        Member member = requireMember(memberId);
-        if (member.getRole() != MemberRole.STUDENT) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "학생만 이용할 수 있는 기능입니다.");
-        }
-        return member;
     }
 
     private void requireOwnerOrAdmin(Member requester, Member owner) {

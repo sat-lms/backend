@@ -6,9 +6,8 @@ import com.sat.lms.attachment.entity.SubmissionAttachment;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.response.PageResponse;
-import com.sat.lms.member.entity.Member;
-import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.submission.dto.AdminAssignmentSubmissionCounts;
 import com.sat.lms.submission.dto.AdminSubmissionDetailResponse;
 import com.sat.lms.submission.dto.AdminSubmissionStudentRow;
@@ -28,14 +27,17 @@ import java.util.List;
 @Transactional(readOnly = true)
 public class AdminSubmissionService {
     private final MemberRepository memberRepository;
+    private final MemberGuard memberGuard;
     private final AssignmentRepository assignmentRepository;
     private final SubmissionRepository submissionRepository;
     private final SubmissionAttachmentRepository submissionAttachmentRepository;
 
-    public AdminSubmissionService(MemberRepository memberRepository, AssignmentRepository assignmentRepository,
+    public AdminSubmissionService(MemberRepository memberRepository, MemberGuard memberGuard,
+                                  AssignmentRepository assignmentRepository,
                                   SubmissionRepository submissionRepository,
                                   SubmissionAttachmentRepository submissionAttachmentRepository) {
         this.memberRepository = memberRepository;
+        this.memberGuard = memberGuard;
         this.assignmentRepository = assignmentRepository;
         this.submissionRepository = submissionRepository;
         this.submissionAttachmentRepository = submissionAttachmentRepository;
@@ -43,7 +45,7 @@ public class AdminSubmissionService {
 
     public AdminSubmissionSummaryResponse getSubmissionStatus(Long assignmentId, SubmissionStatusFilter status,
                                                               Pageable pageable, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         requireAssignment(assignmentId);
 
         AdminAssignmentSubmissionCounts counts = memberRepository.countSubmissionStatusByAssignmentId(assignmentId);
@@ -56,7 +58,7 @@ public class AdminSubmissionService {
     }
 
     public AdminSubmissionDetailResponse getSubmissionDetail(Long submissionId, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         Submission submission = submissionRepository.findWithStudentAndAssignmentById(submissionId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 제출물입니다."));
         List<Attachment> attachments = submissionAttachmentRepository
@@ -72,12 +74,4 @@ public class AdminSubmissionService {
         }
     }
 
-    private Member requireAdmin(Long memberId) {
-        Member member = memberRepository.findById(memberId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
-        if (member.getRole() != MemberRole.ADMIN) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다.");
-        }
-        return member;
-    }
 }

@@ -8,7 +8,7 @@ import com.sat.lms.attachment.repository.AssignmentAttachmentRepository;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,7 @@ class AssignmentServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-27T12:00:00Z");
     AssignmentRepository assignmentRepository;
     SubmissionRepository submissionRepository;
-    MemberRepository memberRepository;
+    MemberGuard memberGuard;
     AssignmentAttachmentRepository assignmentAttachmentRepository;
     AssignmentAttachmentCleanup attachmentCleanup;
     AssignmentService service;
@@ -47,10 +47,10 @@ class AssignmentServiceTest {
     void setUp() {
         assignmentRepository = mock(AssignmentRepository.class);
         submissionRepository = mock(SubmissionRepository.class);
-        memberRepository = mock(MemberRepository.class);
+        memberGuard = mock(MemberGuard.class);
         assignmentAttachmentRepository = mock(AssignmentAttachmentRepository.class);
         attachmentCleanup = mock(AssignmentAttachmentCleanup.class);
-        service = new AssignmentService(assignmentRepository, submissionRepository, memberRepository,
+        service = new AssignmentService(assignmentRepository, submissionRepository, memberGuard,
                 Clock.fixed(NOW, ZoneOffset.UTC), assignmentAttachmentRepository, attachmentCleanup);
     }
 
@@ -63,7 +63,7 @@ class AssignmentServiceTest {
         when(request.getContent()).thenReturn(" 내용 ");
         when(request.getDueAt()).thenReturn(dueAt);
         when(request.getAllowLateSubmission()).thenReturn(true);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         when(assignmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.create(request, 7L);
@@ -81,7 +81,7 @@ class AssignmentServiceTest {
     void futureDueAtIsSaved() {
         AssignmentCreateRequest request = createRequest(LocalDateTime.parse("2026-08-27T21:00:01"));
         Member admin = member(MemberRole.ADMIN);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         when(assignmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.create(request, 7L);
@@ -105,7 +105,7 @@ class AssignmentServiceTest {
     @Test
     void studentCannotCreateUpdateOrDelete() {
         Member student = member(MemberRole.STUDENT);
-        when(memberRepository.findById(8L)).thenReturn(Optional.of(student));
+        stubApprovedMember(8L, student);
 
         assertForbidden(() -> service.create(mock(AssignmentCreateRequest.class), 8L));
         assertForbidden(() -> service.update(1L, new AssignmentUpdateRequest(), 8L));
@@ -116,7 +116,7 @@ class AssignmentServiceTest {
     @Test
     void authenticatedMemberCanListUsingAllowedSort() {
         Member student = member(MemberRole.STUDENT);
-        when(memberRepository.findById(8L)).thenReturn(Optional.of(student));
+        stubApprovedMember(8L, student);
         when(assignmentRepository.findAssignmentPage(any())).thenReturn(Page.empty());
 
         service.getAssignments(8L, PageRequest.of(1, 5, Sort.by(Sort.Direction.ASC, "dueAt")));
@@ -131,7 +131,7 @@ class AssignmentServiceTest {
     @Test
     void defaultAndAllAllowedSortFieldsAreAccepted() {
         Member student = member(MemberRole.STUDENT);
-        when(memberRepository.findById(8L)).thenReturn(Optional.of(student));
+        stubApprovedMember(8L, student);
         when(assignmentRepository.findAssignmentPage(any())).thenReturn(Page.empty());
 
         for (String field : new String[]{"createdAt", "updatedAt", "dueAt", "title"}) {
@@ -151,7 +151,7 @@ class AssignmentServiceTest {
     @Test
     void unsupportedSortFieldAndDirectionReturnBadRequest() {
         Member student = member(MemberRole.STUDENT);
-        when(memberRepository.findById(8L)).thenReturn(Optional.of(student));
+        stubApprovedMember(8L, student);
 
         assertBadRequest(() -> service.getAssignments(8L,
                 PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "content"))));
@@ -170,7 +170,7 @@ class AssignmentServiceTest {
         AssignmentUpdateRequest request = new AssignmentUpdateRequest();
         request.setTitle(" 새 제목 ");
         request.setAllowLateSubmission(false);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
 
         service.update(1L, request, 7L);
@@ -185,7 +185,7 @@ class AssignmentServiceTest {
     @Test
     void emptyOrNullPatchFieldsReturnBadRequest() {
         Member admin = member(MemberRole.ADMIN);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         assertBadRequest(() -> service.update(1L, new AssignmentUpdateRequest(), 7L));
 
         AssignmentUpdateRequest blankTitle = new AssignmentUpdateRequest();
@@ -207,7 +207,7 @@ class AssignmentServiceTest {
 
     @Test
     void missingMemberReturnsNotFoundBeforeRepositoryAccess() {
-        when(memberRepository.findById(404L)).thenReturn(Optional.empty());
+        stubMissingMember(404L);
 
         assertNotFound(() -> service.getAssignments(404L,
                 PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"))));
@@ -219,7 +219,7 @@ class AssignmentServiceTest {
     @Test
     void missingAssignmentReturnsNotFound() {
         Member admin = member(MemberRole.ADMIN);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         when(assignmentRepository.findById(99L)).thenReturn(Optional.empty());
         when(assignmentRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
         AssignmentUpdateRequest update = new AssignmentUpdateRequest();
@@ -234,7 +234,7 @@ class AssignmentServiceTest {
     void adminDeletesAssignmentWithoutSubmission() {
         Member admin = member(MemberRole.ADMIN);
         Assignment assignment = Assignment.create(admin, "제목", "내용", OffsetDateTime.now(), false);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         when(assignmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.existsByAssignmentId(1L)).thenReturn(false);
 
@@ -249,7 +249,7 @@ class AssignmentServiceTest {
     void assignmentWithSubmissionCannotBeDeleted() {
         Member admin = member(MemberRole.ADMIN);
         Assignment assignment = Assignment.create(admin, "제목", "내용", OffsetDateTime.now(), false);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         when(assignmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.existsByAssignmentId(1L)).thenReturn(true);
 
@@ -273,7 +273,7 @@ class AssignmentServiceTest {
                 OffsetDateTime.parse("2026-08-28T00:00:00+09:00"), true);
         AssignmentUpdateRequest request = new AssignmentUpdateRequest();
         request.setDueAt(LocalDateTime.parse("2026-08-29T23:59:59"));
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
 
         service.update(1L, request, 7L);
@@ -300,7 +300,7 @@ class AssignmentServiceTest {
 
     private void assertInvalidCreateDueAt(LocalDateTime dueAt) {
         Member admin = member(MemberRole.ADMIN);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
 
         assertThatThrownBy(() -> service.create(createRequest(dueAt), 7L))
                 .isInstanceOfSatisfying(BusinessException.class, exception -> {
@@ -317,7 +317,7 @@ class AssignmentServiceTest {
         AssignmentUpdateRequest request = new AssignmentUpdateRequest();
         request.setTitle("변경 제목");
         request.setDueAt(dueAt);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
 
         assertThatThrownBy(() -> service.update(1L, request, 7L))
@@ -338,5 +338,21 @@ class AssignmentServiceTest {
         assertThatThrownBy(action::run)
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getStatus()).isEqualTo(status));
+    }
+
+    private void stubApprovedMember(Long memberId, Member member) {
+        when(memberGuard.requireMember(memberId)).thenReturn(member);
+        if (member.getRole() == MemberRole.ADMIN) {
+            when(memberGuard.requireAdmin(memberId)).thenReturn(member);
+        } else {
+            when(memberGuard.requireAdmin(memberId))
+                    .thenThrow(new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다."));
+        }
+    }
+
+    private void stubMissingMember(Long memberId) {
+        BusinessException notFound = new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다.");
+        when(memberGuard.requireMember(memberId)).thenThrow(notFound);
+        when(memberGuard.requireAdmin(memberId)).thenThrow(notFound);
     }
 }

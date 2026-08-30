@@ -12,7 +12,7 @@ import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.submission.dto.SubmissionCreateRequest;
 import com.sat.lms.submission.dto.SubmissionFileResponse;
 import com.sat.lms.submission.dto.SubmissionListResponse;
@@ -53,7 +53,7 @@ import static org.mockito.Mockito.when;
 class SubmissionServiceTest {
     SubmissionRepository submissionRepository;
     AssignmentRepository assignmentRepository;
-    MemberRepository memberRepository;
+    MemberGuard memberGuard;
     AttachmentRepository attachmentRepository;
     SubmissionAttachmentRepository submissionAttachmentRepository;
     FileStorage fileStorage;
@@ -63,11 +63,11 @@ class SubmissionServiceTest {
     void setUp() {
         submissionRepository = mock(SubmissionRepository.class);
         assignmentRepository = mock(AssignmentRepository.class);
-        memberRepository = mock(MemberRepository.class);
+        memberGuard = mock(MemberGuard.class);
         attachmentRepository = mock(AttachmentRepository.class);
         submissionAttachmentRepository = mock(SubmissionAttachmentRepository.class);
         fileStorage = mock(FileStorage.class);
-        service = new SubmissionService(submissionRepository, assignmentRepository, memberRepository,
+        service = new SubmissionService(submissionRepository, assignmentRepository, memberGuard,
                 attachmentRepository, submissionAttachmentRepository, fileStorage, Clock.systemUTC());
 
         when(submissionRepository.save(any())).thenAnswer(invocation -> {
@@ -185,7 +185,7 @@ class SubmissionServiceTest {
         Member student = student(3L);
         Assignment assignment = assignment(true, OffsetDateTime.ofInstant(now.minusSeconds(1), ZoneOffset.ofHours(9)));
         Submission submission = existingSubmission(5L, student, assignment, "old", false);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of());
@@ -273,7 +273,7 @@ class SubmissionServiceTest {
     void adminCannotSubmit() {
         Member admin = mock(Member.class);
         when(admin.getRole()).thenReturn(MemberRole.ADMIN);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
 
         assertThatThrownBy(() -> service.submit(1L, 7L, request("내용"), null))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -283,7 +283,7 @@ class SubmissionServiceTest {
 
     @Test
     void unknownMemberReturnsNotFound() {
-        when(memberRepository.findById(99L)).thenReturn(Optional.empty());
+        stubMissingMember(99L);
         assertThatThrownBy(() -> service.submit(1L, 99L, request("내용"), null))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
@@ -292,7 +292,7 @@ class SubmissionServiceTest {
     @Test
     void missingAssignmentReturnsNotFound() {
         Member student = student(3L);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(assignmentRepository.findById(99L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.submit(99L, 3L, request("내용"), null))
@@ -375,7 +375,7 @@ class SubmissionServiceTest {
         Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
         Submission submission = Submission.create(assignment, student, "내용", false);
         setId(submission, 5L);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         Attachment attachment = Attachment.create("a.txt", "uuid.txt", "submissions/5/uuid.txt", "txt", 1L);
         SubmissionAttachment link = SubmissionAttachment.create(submission, attachment);
@@ -391,7 +391,7 @@ class SubmissionServiceTest {
     @Test
     void getMySubmissionReturnsNotFoundWhenAbsent() {
         Member student = student(3L);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getMySubmission(1L, 3L))
@@ -402,7 +402,7 @@ class SubmissionServiceTest {
     @Test
     void getMySubmissionsGroupsAttachmentsBySubmissionAndLeavesOthersEmpty() {
         Member student = student(3L);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         SubmissionListResponse withFile = new SubmissionListResponse(10L, 1L, "과제1", "내용1", false,
                 OffsetDateTime.now(), OffsetDateTime.now());
         SubmissionListResponse withoutFile = new SubmissionListResponse(20L, 2L, "과제2", "내용2", true,
@@ -427,7 +427,7 @@ class SubmissionServiceTest {
     @Test
     void getMySubmissionsSkipsAttachmentQueryWhenPageIsEmpty() {
         Member student = student(3L);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         Pageable pageable = PageRequest.of(0, 20);
         when(submissionRepository.findSubmissionPageByStudentId(3L, pageable))
                 .thenReturn(new PageImpl<>(List.of(), pageable, 0));
@@ -442,7 +442,7 @@ class SubmissionServiceTest {
     void getMySubmissionsForbiddenForAdmin() {
         Member admin = mock(Member.class);
         when(admin.getRole()).thenReturn(MemberRole.ADMIN);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
 
         assertThatThrownBy(() -> service.getMySubmissions(7L, PageRequest.of(0, 20)))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -457,7 +457,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, "old text", false);
         Attachment oldAttachment = attachment("old.txt", "submissions/5/old.txt");
         SubmissionAttachment oldLink = SubmissionAttachment.create(submission, oldAttachment);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(oldLink));
@@ -479,7 +479,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, "old text", false);
         Attachment oldAttachment = attachment("old.txt", "submissions/5/old.txt");
         SubmissionAttachment oldLink = SubmissionAttachment.create(submission, oldAttachment);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(oldLink));
@@ -511,7 +511,7 @@ class SubmissionServiceTest {
         Member student = student(3L);
         Assignment assignment = assignment(false, OffsetDateTime.now().minusDays(1));
         Submission submission = existingSubmission(5L, student, assignment, "old", false);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
 
@@ -528,7 +528,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, "old", false);
         Attachment oldAttachment = attachment("old.txt", "submissions/5/old.txt");
         SubmissionAttachment oldLink = SubmissionAttachment.create(submission, oldAttachment);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(oldLink));
@@ -554,7 +554,7 @@ class SubmissionServiceTest {
         Attachment attachment2 = attachment("b.txt", "submissions/5/b.txt");
         SubmissionAttachment link1 = SubmissionAttachment.create(submission, attachment1);
         SubmissionAttachment link2 = SubmissionAttachment.create(submission, attachment2);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L))
                 .thenReturn(List.of(link1, link2));
@@ -575,7 +575,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, "text", false);
         Attachment attachmentEntity = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, attachmentEntity);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(link));
         doThrow(new RuntimeException("transient"))
@@ -595,7 +595,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, "text", false);
         Attachment attachmentEntity = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, attachmentEntity);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(link));
         doThrow(new RuntimeException("permanent")).when(fileStorage).delete("submissions/5/a.txt");
@@ -609,7 +609,7 @@ class SubmissionServiceTest {
     @Test
     void deleteSubmissionMissingReturnsNotFound() {
         Member student = student(3L);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.deleteSubmission(1L, 3L))
@@ -624,7 +624,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, "text", false);
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(fileStorage.createDownloadUrl("submissions/5/a.txt"))
@@ -647,7 +647,7 @@ class SubmissionServiceTest {
         Member admin = mock(Member.class);
         when(admin.getId()).thenReturn(7L);
         when(admin.getRole()).thenReturn(MemberRole.ADMIN);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(fileStorage.createDownloadUrl("submissions/5/a.txt"))
@@ -666,7 +666,7 @@ class SubmissionServiceTest {
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
         Member other = student(8L);
-        when(memberRepository.findById(8L)).thenReturn(Optional.of(other));
+        stubApprovedMember(8L, other);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
 
@@ -679,7 +679,7 @@ class SubmissionServiceTest {
     @Test
     void getDownloadUrlMissingAttachmentReturnsNotFound() {
         Member student = student(3L);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(99L))
                 .thenReturn(Optional.empty());
 
@@ -696,7 +696,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, null, false);
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(2L);
@@ -715,7 +715,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, null, false);
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(1L);
@@ -736,7 +736,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, "남은 텍스트", false);
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(1L);
@@ -754,7 +754,7 @@ class SubmissionServiceTest {
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
         Member other = student(8L);
-        when(memberRepository.findById(8L)).thenReturn(Optional.of(other));
+        stubApprovedMember(8L, other);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
 
@@ -767,7 +767,7 @@ class SubmissionServiceTest {
     void deleteAttachmentForbiddenForAdmin() {
         Member admin = mock(Member.class);
         when(admin.getRole()).thenReturn(MemberRole.ADMIN);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        stubApprovedMember(7L, admin);
 
         assertThatThrownBy(() -> service.deleteAttachment(10L, 7L))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -782,7 +782,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, "text", true);
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
 
@@ -799,7 +799,7 @@ class SubmissionServiceTest {
         Submission submission = existingSubmission(5L, student, assignment, null, false);
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(2L);
@@ -815,7 +815,7 @@ class SubmissionServiceTest {
     @Test
     void deleteAttachmentMissingReturnsNotFound() {
         Member student = student(3L);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        stubApprovedMember(3L, student);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(99L))
                 .thenReturn(Optional.empty());
 
@@ -827,7 +827,7 @@ class SubmissionServiceTest {
     private void givenStudentAndAssignment(Long memberId, boolean allowLate, OffsetDateTime dueAt) {
         Member student = student(memberId);
         Assignment assignment = assignment(allowLate, dueAt);
-        when(memberRepository.findById(memberId)).thenReturn(Optional.of(student));
+        stubApprovedMember(memberId, student);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
     }
 
@@ -878,8 +878,24 @@ class SubmissionServiceTest {
     }
 
     private void useClock(Clock clock) {
-        service = new SubmissionService(submissionRepository, assignmentRepository, memberRepository,
+        service = new SubmissionService(submissionRepository, assignmentRepository, memberGuard,
                 attachmentRepository, submissionAttachmentRepository, fileStorage, clock);
+    }
+
+    private void stubApprovedMember(Long memberId, Member member) {
+        when(memberGuard.requireMember(memberId)).thenReturn(member);
+        if (member.getRole() == MemberRole.STUDENT) {
+            when(memberGuard.requireStudent(memberId)).thenReturn(member);
+        } else {
+            when(memberGuard.requireStudent(memberId))
+                    .thenThrow(new BusinessException(HttpStatus.FORBIDDEN, "학생만 이용할 수 있는 기능입니다."));
+        }
+    }
+
+    private void stubMissingMember(Long memberId) {
+        BusinessException notFound = new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다.");
+        when(memberGuard.requireMember(memberId)).thenThrow(notFound);
+        when(memberGuard.requireStudent(memberId)).thenThrow(notFound);
     }
 
     private void setId(Submission submission, Long id) {

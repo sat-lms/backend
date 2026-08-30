@@ -9,6 +9,7 @@ import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.submission.dto.AdminAssignmentSubmissionCounts;
 import com.sat.lms.submission.dto.AdminSubmissionStudentRow;
 import com.sat.lms.submission.dto.SubmissionStatusFilter;
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.when;
 
 class AdminSubmissionServiceTest {
     MemberRepository memberRepository;
+    MemberGuard memberGuard;
     AssignmentRepository assignmentRepository;
     SubmissionRepository submissionRepository;
     SubmissionAttachmentRepository submissionAttachmentRepository;
@@ -44,17 +46,18 @@ class AdminSubmissionServiceTest {
     @BeforeEach
     void setUp() {
         memberRepository = mock(MemberRepository.class);
+        memberGuard = mock(MemberGuard.class);
         assignmentRepository = mock(AssignmentRepository.class);
         submissionRepository = mock(SubmissionRepository.class);
         submissionAttachmentRepository = mock(SubmissionAttachmentRepository.class);
-        service = new AdminSubmissionService(memberRepository, assignmentRepository, submissionRepository,
-                submissionAttachmentRepository);
+        service = new AdminSubmissionService(memberRepository, memberGuard, assignmentRepository,
+                submissionRepository, submissionAttachmentRepository);
     }
 
     @Test
     void getSubmissionStatusReturnsCountsAndStudentPage() {
         Member admin = admin(7L);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(assignmentRepository.existsById(1L)).thenReturn(true);
         AdminAssignmentSubmissionCounts counts = new AdminAssignmentSubmissionCounts(2L, 2L, 1L);
         when(memberRepository.countSubmissionStatusByAssignmentId(1L)).thenReturn(counts);
@@ -76,7 +79,7 @@ class AdminSubmissionServiceTest {
     @Test
     void getSubmissionStatusPassesStatusFilterThrough() {
         Member admin = admin(7L);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(assignmentRepository.existsById(1L)).thenReturn(true);
         when(memberRepository.countSubmissionStatusByAssignmentId(1L))
                 .thenReturn(new AdminAssignmentSubmissionCounts(0L, 0L, 0L));
@@ -91,9 +94,8 @@ class AdminSubmissionServiceTest {
 
     @Test
     void getSubmissionStatusForbiddenForStudent() {
-        Member student = mock(Member.class);
-        when(student.getRole()).thenReturn(MemberRole.STUDENT);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(memberGuard.requireAdmin(3L))
+                .thenThrow(new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다."));
 
         assertThatThrownBy(() -> service.getSubmissionStatus(1L, null, PageRequest.of(0, 20), 3L))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -104,7 +106,7 @@ class AdminSubmissionServiceTest {
     @Test
     void getSubmissionStatusMissingAssignmentReturnsNotFound() {
         Member admin = admin(7L);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(assignmentRepository.existsById(99L)).thenReturn(false);
 
         assertThatThrownBy(() -> service.getSubmissionStatus(99L, null, PageRequest.of(0, 20), 7L))
@@ -117,7 +119,7 @@ class AdminSubmissionServiceTest {
     @Test
     void getSubmissionDetailReturnsMappedResponse() {
         Member admin = admin(7L);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         Member student = mock(Member.class);
         when(student.getStudentNumber()).thenReturn("20231234");
         when(student.getName()).thenReturn("학생");
@@ -145,7 +147,7 @@ class AdminSubmissionServiceTest {
     @Test
     void getSubmissionDetailMissingReturnsNotFound() {
         Member admin = admin(7L);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(submissionRepository.findWithStudentAndAssignmentById(99L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getSubmissionDetail(99L, 7L))
@@ -155,9 +157,8 @@ class AdminSubmissionServiceTest {
 
     @Test
     void getSubmissionDetailForbiddenForStudent() {
-        Member student = mock(Member.class);
-        when(student.getRole()).thenReturn(MemberRole.STUDENT);
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(student));
+        when(memberGuard.requireAdmin(3L))
+                .thenThrow(new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다."));
 
         assertThatThrownBy(() -> service.getSubmissionDetail(5L, 3L))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -167,7 +168,8 @@ class AdminSubmissionServiceTest {
 
     @Test
     void getSubmissionDetailUnknownMemberReturnsNotFound() {
-        when(memberRepository.findById(99L)).thenReturn(Optional.empty());
+        when(memberGuard.requireAdmin(99L))
+                .thenThrow(new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
 
         assertThatThrownBy(() -> service.getSubmissionDetail(5L, 99L))
                 .isInstanceOfSatisfying(BusinessException.class,

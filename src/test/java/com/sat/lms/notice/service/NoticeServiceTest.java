@@ -3,7 +3,7 @@ package com.sat.lms.notice.service;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.notice.dto.NoticeCreateRequest;
 import com.sat.lms.notice.dto.NoticeListResponse;
 import com.sat.lms.notice.dto.NoticeUpdateRequest;
@@ -36,7 +36,7 @@ import static org.mockito.Mockito.when;
 class NoticeServiceTest {
     NoticeRepository noticeRepository;
     NoticeReadRepository noticeReadRepository;
-    MemberRepository memberRepository;
+    MemberGuard memberGuard;
     NoticeAttachmentCleanup attachmentCleanup;
     NoticeAttachmentRepository noticeAttachmentRepository;
     NoticeService service;
@@ -45,10 +45,10 @@ class NoticeServiceTest {
     void setUp() {
         noticeRepository = mock(NoticeRepository.class);
         noticeReadRepository = mock(NoticeReadRepository.class);
-        memberRepository = mock(MemberRepository.class);
+        memberGuard = mock(MemberGuard.class);
         attachmentCleanup = mock(NoticeAttachmentCleanup.class);
         noticeAttachmentRepository = mock(NoticeAttachmentRepository.class);
-        service = new NoticeService(noticeRepository, noticeReadRepository, memberRepository,
+        service = new NoticeService(noticeRepository, noticeReadRepository, memberGuard,
                 attachmentCleanup, noticeAttachmentRepository);
     }
 
@@ -86,7 +86,7 @@ class NoticeServiceTest {
     void detailInsertsReadRecordWithConflictSafeRepositoryOperationEachTime() {
         Notice notice = notice();
         when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(mock(Member.class)));
+        when(memberGuard.requireMember(3L)).thenReturn(mock(Member.class));
 
         service.getNotice(1L, 3L);
         service.getNotice(1L, 3L);
@@ -99,7 +99,7 @@ class NoticeServiceTest {
     void detailReturnsOnlyAttachmentsConnectedToNoticeInRepositoryOrder() {
         Notice notice = notice();
         when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(mock(Member.class)));
+        when(memberGuard.requireMember(3L)).thenReturn(mock(Member.class));
         Attachment first = attachment(10L, "첫.pdf", "pdf", 2L);
         Attachment second = attachment(20L, "둘.HWPX", "hwpx", 1024L);
         NoticeAttachment firstLink = link(first);
@@ -121,7 +121,7 @@ class NoticeServiceTest {
     void detailWithoutAttachmentsReturnsEmptyArrayModel() {
         Notice notice = notice();
         when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
-        when(memberRepository.findById(3L)).thenReturn(Optional.of(mock(Member.class)));
+        when(memberGuard.requireMember(3L)).thenReturn(mock(Member.class));
 
         assertThat(service.getNotice(1L, 3L).getAttachments()).isEmpty();
     }
@@ -140,7 +140,7 @@ class NoticeServiceTest {
         Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false);
         NoticeUpdateRequest request = new NoticeUpdateRequest();
         request.setTitle("새 제목");
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
 
         service.update(1L, request, 7L);
@@ -156,7 +156,7 @@ class NoticeServiceTest {
         Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false);
         NoticeUpdateRequest request = new NoticeUpdateRequest();
         request.setTitle("새 제목");
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
         when(noticeReadRepository.existsByNoticeIdAndMemberId(1L, 7L)).thenReturn(true);
 
@@ -172,7 +172,7 @@ class NoticeServiceTest {
         Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false);
         NoticeUpdateRequest request = new NoticeUpdateRequest();
         request.setTitle("새 제목");
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
         when(noticeReadRepository.existsByNoticeIdAndMemberId(1L, 7L)).thenReturn(false);
 
@@ -186,7 +186,7 @@ class NoticeServiceTest {
     void updateAcceptsOneHundredCharacterTitleAndRejectsOneHundredOne() {
         Member admin = admin();
         Notice notice = Notice.create(admin, "기존 제목", "기존 내용", false);
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
         NoticeUpdateRequest valid = new NoticeUpdateRequest();
         valid.setTitle("a".repeat(100));
@@ -204,7 +204,7 @@ class NoticeServiceTest {
     @Test
     void emptyPatchReturnsBadRequest() {
         Member admin = admin();
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         assertThatThrownBy(() -> service.update(1L, new NoticeUpdateRequest(), 7L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
@@ -213,7 +213,7 @@ class NoticeServiceTest {
     @Test
     void missingUpdateAndDeleteReturnNotFound() {
         Member admin = admin();
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(noticeRepository.findWithAdminById(99L)).thenReturn(Optional.empty());
         when(noticeRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
         NoticeUpdateRequest request = new NoticeUpdateRequest();
@@ -229,7 +229,7 @@ class NoticeServiceTest {
         NoticeCreateRequest request = mock(NoticeCreateRequest.class);
         when(request.getTitle()).thenReturn("제목");
         when(request.getContent()).thenReturn("내용");
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(noticeRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.create(request, 7L);
@@ -243,7 +243,7 @@ class NoticeServiceTest {
     void deleteLocksNoticeCleansAttachmentsAndFlushesNoticeDeletion() {
         Member admin = admin();
         Notice notice = notice();
-        when(memberRepository.findById(7L)).thenReturn(Optional.of(admin));
+        when(memberGuard.requireAdmin(7L)).thenReturn(admin);
         when(noticeRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(notice));
 
         service.delete(1L, 7L);
