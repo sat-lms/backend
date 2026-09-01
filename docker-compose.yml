@@ -28,6 +28,10 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # 컨테이너로 띄우는 경우는 배포 형태로 간주해 기본 프로파일을 prod로 둡니다.
+      # 서버 .env에 값을 넣는 걸 잊어도 운영이 dev 설정으로 기동되지 않습니다.
+      # 로컬에서 컨테이너를 dev 설정으로 띄우려면 .env에 SPRING_PROFILES_ACTIVE=dev를 넣으세요.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       # .env의 DB_URL(localhost 기준)은 로컬에서 애플리케이션을 직접 실행할 때만
       # 쓰입니다. 이 app 컨테이너 안에서는 localhost가 postgres가 아니라 이
       # 컨테이너 자신을 가리키므로, 여기서는 항상 서비스명 postgres로 재구성해서

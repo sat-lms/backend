@@ -36,6 +36,40 @@ postgres 포트는 호스트에 노출되지 않습니다. Docker가 iptables를
 docker exec -it team-postgres psql -U $DB_USERNAME -d $DB_NAME
 ```
 
+## 환경별 설정 (Spring 프로파일)
+
+설정은 공통 파일과 프로파일 파일로 나뉘어 있습니다.
+
+| 파일 | 역할 |
+| --- | --- |
+| `src/main/resources/application.yaml` | 전 환경 공통 (datasource 플레이스홀더, JPA, multipart, flyway, jwt, aws) |
+| `src/main/resources/application-dev.yaml` | 로컬 개발 — SQL 로그 on, `com.sat.lms` DEBUG, CORS에 localhost 포함 |
+| `src/main/resources/application-prod.yaml` | 배포 서버 — SQL 로그 off, root INFO, CORS는 배포 도메인만 |
+| `src/test/resources/application-test.yaml` | 테스트/CI — 더미 datasource, 테스트용 jwt 시크릿 |
+
+활성화되는 프로파일은 실행 방식에 따라 정해집니다.
+
+| 실행 방식 | 프로파일 | 결정 방식 |
+| --- | --- | --- |
+| IDE, `./gradlew bootRun` | `dev` | `application.yaml`의 `spring.profiles.default` |
+| `docker compose up app` | `prod` | `docker-compose.yml`의 `SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}` |
+| `./gradlew test`, CI | `test` | `build.gradle` test 태스크의 `spring.profiles.active` |
+
+컨테이너 기본값이 `prod`이므로 **서버 `.env`에 `SPRING_PROFILES_ACTIVE`를 넣지 않아도 운영은 prod로 뜹니다.**
+반대로 로컬에서 컨테이너를 dev 설정으로 띄우고 싶으면 개인 `.env`에 `SPRING_PROFILES_ACTIVE=dev`를 추가하세요.
+
+배포 후 실제로 어떤 프로파일이 적용됐는지는 기동 로그로 확인합니다:
+
+```
+docker compose logs app | grep "profile is active"
+```
+
+### CORS 오리진 변경
+
+허용 오리진은 코드가 아니라 설정에 있습니다. 프론트 도메인이 바뀌면 서버 `.env`에
+`CORS_ALLOWED_ORIGINS`(여러 개면 콤마 구분)를 설정하고 `docker compose up -d app`으로 재기동하면 됩니다.
+운영 프로파일에는 localhost 오리진이 포함되지 않습니다.
+
 ## DB_URL 관련 참고
 
 `.env`의 `DB_URL`(`jdbc:postgresql://localhost:5432/...`)은 애플리케이션을 Docker 밖에서

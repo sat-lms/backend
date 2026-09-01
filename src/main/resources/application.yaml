@@ -2,6 +2,12 @@ spring:
   application:
     name: lms
 
+  profiles:
+    # 프로파일을 지정하지 않고 실행하면(IDE, ./gradlew bootRun) dev로 동작합니다.
+    # 컨테이너 실행은 docker-compose.yml이 SPRING_PROFILES_ACTIVE로 prod를 넘기고,
+    # 테스트는 build.gradle이 test 프로파일을 활성화합니다.
+    default: dev
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -12,10 +18,8 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
-    show-sql: true
     properties:
       hibernate:
-        format_sql: true
         jdbc:
           time_zone: UTC
 
