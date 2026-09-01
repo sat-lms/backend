@@ -33,13 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @Testcontainers(disabledWithoutDocker = true)
 @AutoConfigureMockMvc
-@SpringBootTest(properties = {
-        "spring.jpa.hibernate.ddl-auto=validate",
-        "spring.jpa.properties.hibernate.generate_statistics=true",
-        "spring.flyway.enabled=true",
-        "spring.flyway.locations=classpath:db/migration",
-        "jwt.secret=test-secret-key-must-be-at-least-32-bytes"
-})
+@SpringBootTest
 class MemberGuardPostgreSqlIntegrationTest {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")

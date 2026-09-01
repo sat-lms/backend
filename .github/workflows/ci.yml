@@ -24,17 +24,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # 테스트에 필요한 더미 datasource·jwt 설정은 src/test/resources/application-test.yaml이
+      # 담당합니다(test 프로파일은 build.gradle의 test 태스크가 활성화).
       - name: Run tests
-        env:
-          # Testcontainers 기반 통합 테스트는 @DynamicPropertySource로 datasource를
-          # 직접 주입받으므로 이 값들이 실제로 쓰이지는 않지만, 앞으로 추가될 테스트가
-          # Spring Context를 로드할 때 DB_URL 등 필수 플레이스홀더(기본값 없음) 때문에
-          # 실패하지 않도록 더미 값을 넣어둡니다. 운영 값이 아닙니다.
-          DB_URL: jdbc:postgresql://localhost:5432/ci_dummy
-          DB_NAME: ci_dummy
-          DB_USERNAME: ci_dummy
-          DB_PASSWORD: ci_dummy
-          JWT_SECRET: ci-test-secret-key-must-be-at-least-32-bytes
         run: ./gradlew test --no-daemon
 
       - name: Upload test report

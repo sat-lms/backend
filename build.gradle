@@ -40,6 +40,7 @@ dependencies {
 }
 
 tasks.named('test') {
+	systemProperty 'spring.profiles.active', 'test'
 	useJUnitPlatform {
 		excludeTags 's3-integration'
 	}
@@ -50,6 +51,7 @@ tasks.register('s3IntegrationTest', Test) {
 	group = 'verification'
 	testClassesDirs = sourceSets.test.output.classesDirs
 	classpath = sourceSets.test.runtimeClasspath
+	systemProperty 'spring.profiles.active', 'test'
 	useJUnitPlatform {
 		includeTags 's3-integration'
 	}
