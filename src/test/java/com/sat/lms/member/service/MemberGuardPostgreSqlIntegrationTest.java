@@ -18,6 +18,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
@@ -168,7 +169,7 @@ class MemberGuardPostgreSqlIntegrationTest {
 
     private MockMultipartFile jsonPart(String textContent) {
         String body = "{\"textContent\":\"" + textContent + "\"}";
-        return new MockMultipartFile("request", "request", "application/json", body.getBytes());
+        return new MockMultipartFile("request", "request", "application/json", body.getBytes(StandardCharsets.UTF_8));
     }
 
     private Long insertMember(String studentNumber, String name, String role, String status) {
