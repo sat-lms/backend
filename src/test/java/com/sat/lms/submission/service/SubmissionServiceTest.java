@@ -448,7 +448,57 @@ class SubmissionServiceTest {
         assertThat(result.getContent()).hasSize(2);
         assertThat(result.getContent().get(0).getAttachments()).extracting(SubmissionFileResponse::getOriginalName)
                 .containsExactly("a.txt");
+        assertThat(result.getContent().get(0).getFileNames()).containsExactly("a.txt");
         assertThat(result.getContent().get(1).getAttachments()).isEmpty();
+        assertThat(result.getContent().get(1).getFileNames()).isEmpty();
+        verify(submissionAttachmentRepository).findWithAttachmentBySubmissionIdIn(List.of(10L, 20L));
+    }
+
+    @Test
+    void getMySubmissionsMixedPageQueriesAttachmentsWithOnlyNonNullSubmissionIds() {
+        Member student = student(3L);
+        stubApprovedMember(3L, student);
+        SubmissionListResponse submitted = listRow(10L, 1L);
+        SubmissionListResponse notSubmitted = listRow(null, 2L);
+        Pageable pageable = PageRequest.of(0, 20);
+        when(submissionRepository.findMySubmissionPageDueAtDesc(3L, true, pageable))
+                .thenReturn(new PageImpl<>(List.of(submitted, notSubmitted), pageable, 2));
+        Attachment attachmentEntity = attachment("a.txt", "submissions/10/a.txt");
+        SubmissionAttachment attachmentLink = linkTo(10L, attachmentEntity);
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionIdIn(List.of(10L)))
+                .thenReturn(List.of(attachmentLink));
+
+        Page<SubmissionListResponse> result = service.getMySubmissions(
+                3L, true, MySubmissionSort.DUE_AT_DESC, pageable);
+
+        assertThat(result.getContent()).containsExactly(submitted, notSubmitted);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+        verify(submissionAttachmentRepository).findWithAttachmentBySubmissionIdIn(List.of(10L));
+        assertThat(notSubmitted.getAttachments()).isEmpty();
+        assertThat(notSubmitted.getFileNames()).isEmpty();
+    }
+
+    @Test
+    void getMySubmissionsAllNotSubmittedPageSkipsAttachmentQueryAndKeepsPageMetadata() {
+        Member student = student(3L);
+        stubApprovedMember(3L, student);
+        SubmissionListResponse first = listRow(null, 1L);
+        SubmissionListResponse second = listRow(null, 2L);
+        Pageable pageable = PageRequest.of(0, 2);
+        when(submissionRepository.findMySubmissionPageDueAtDesc(3L, true, pageable))
+                .thenReturn(new PageImpl<>(List.of(first, second), pageable, 5));
+
+        Page<SubmissionListResponse> result = service.getMySubmissions(
+                3L, true, MySubmissionSort.DUE_AT_DESC, pageable);
+
+        assertThat(result.getContent()).containsExactly(first, second);
+        assertThat(result.getTotalElements()).isEqualTo(5);
+        assertThat(result.getTotalPages()).isEqualTo(3);
+        assertThat(first.getAttachments()).isEmpty();
+        assertThat(first.getFileNames()).isEmpty();
+        assertThat(second.getAttachments()).isEmpty();
+        assertThat(second.getFileNames()).isEmpty();
+        verify(submissionAttachmentRepository, never()).findWithAttachmentBySubmissionIdIn(any());
     }
 
     @Test
@@ -878,6 +928,13 @@ class SubmissionServiceTest {
         SubmissionCreateRequest request = mock(SubmissionCreateRequest.class);
         when(request.getTextContent()).thenReturn(textContent);
         return request;
+    }
+
+    private SubmissionListResponse listRow(Long submissionId, Long assignmentId) {
+        OffsetDateTime now = OffsetDateTime.now();
+        return new SubmissionListResponse(submissionId, assignmentId, "assignment-" + assignmentId,
+                now.plusDays(1), false, submissionId == null ? null : "text", false,
+                submissionId == null ? null : now, submissionId == null ? null : now);
     }
 
     private Member student(Long id) {

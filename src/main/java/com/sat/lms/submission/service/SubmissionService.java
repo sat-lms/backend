@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -222,15 +223,18 @@ public class SubmissionService {
                 item.isAllowLateSubmission(), now)));
         List<Long> submissionIds = page.getContent().stream()
                 .map(SubmissionListResponse::getSubmissionId)
+                .filter(Objects::nonNull)
                 .toList();
-        Map<Long, List<SubmissionFileResponse>> attachmentsBySubmissionId = submissionAttachmentRepository
-                .findWithAttachmentBySubmissionIdIn(submissionIds).stream()
-                .collect(Collectors.groupingBy(
-                        link -> link.getSubmission().getId(),
-                        Collectors.mapping(link -> SubmissionFileResponse.from(link.getAttachment()),
-                                Collectors.toList())));
-        page.getContent().forEach(item ->
-                item.assignAttachments(attachmentsBySubmissionId.getOrDefault(item.getSubmissionId(), List.of())));
+        Map<Long, List<SubmissionFileResponse>> attachmentsBySubmissionId = submissionIds.isEmpty()
+                ? Map.of()
+                : submissionAttachmentRepository.findWithAttachmentBySubmissionIdIn(submissionIds).stream()
+                        .collect(Collectors.groupingBy(
+                                link -> link.getSubmission().getId(),
+                                Collectors.mapping(link -> SubmissionFileResponse.from(link.getAttachment()),
+                                        Collectors.toList())));
+        page.getContent().forEach(item -> item.assignAttachments(item.getSubmissionId() == null
+                ? List.of()
+                : attachmentsBySubmissionId.getOrDefault(item.getSubmissionId(), List.of())));
         return page;
     }
 

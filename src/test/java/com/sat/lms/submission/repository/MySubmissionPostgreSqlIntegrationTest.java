@@ -260,6 +260,28 @@ class MySubmissionPostgreSqlIntegrationTest {
     }
 
     @Test
+    void allNotSubmittedPageSkipsAttachmentQueryAndExecutesOnlyContentAndCountQueries() throws Exception {
+        Long studentId = insertMember("student15", "student", "STUDENT");
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        for (int i = 0; i < 5; i++) insertAssignment("missing-" + i);
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        mockMvc.perform(get("/api/v1/members/me/submissions")
+                        .param("page", "0").param("size", "2")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(2))
+                .andExpect(jsonPath("$.data.totalElements").value(5))
+                .andExpect(jsonPath("$.data.totalPages").value(3))
+                .andExpect(jsonPath("$.data.content[0].submissionId").doesNotExist())
+                .andExpect(jsonPath("$.data.content[0].attachments.length()").value(0))
+                .andExpect(jsonPath("$.data.content[0].fileNames.length()").value(0));
+
+        assertThat(statistics.getQueryExecutionCount()).isEqualTo(2);
+    }
+
+    @Test
     void assignmentBasedListIncludesMissingRowsWithoutLeakingAnotherStudentsSubmissionAndMatchesApi23Status()
             throws Exception {
         Long studentId = insertMember("student11", "student", "STUDENT");
