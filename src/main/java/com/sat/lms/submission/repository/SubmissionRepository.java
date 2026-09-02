@@ -7,12 +7,24 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
 
 public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     Optional<Submission> findByAssignmentIdAndStudentId(Long assignmentId, Long studentId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from Submission s join fetch s.student join fetch s.assignment where s.assignment.id = :assignmentId and s.student.id = :studentId")
+    Optional<Submission> findByAssignmentIdAndStudentIdForUpdate(@Param("assignmentId") Long assignmentId,
+                                                                  @Param("studentId") Long studentId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = {"student", "assignment"})
+    @Query("select s from Submission s where s.id = :submissionId")
+    Optional<Submission> findWithStudentAndAssignmentByIdForUpdate(@Param("submissionId") Long submissionId);
 
     boolean existsByAssignmentId(Long assignmentId);
 

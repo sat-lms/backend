@@ -8,6 +8,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.sat.lms.admin.service.MemberReviewService;
 import com.sat.lms.assignment.repository.AssignmentRepository;
@@ -51,6 +52,7 @@ class LmsApplicationTests {
 	@MockitoBean SubmissionAttachmentRepository submissionAttachmentRepository;
 	@MockitoBean SubmissionRepository submissionRepository;
 	@MockitoBean JpaMetamodelMappingContext jpaMetamodelMappingContext;
+	@MockitoBean PlatformTransactionManager transactionManager;
 	@Autowired S3Client s3Client;
 	@Autowired S3Presigner s3Presigner;
 	@Autowired AwsProperties awsProperties;

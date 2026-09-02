@@ -9,6 +9,8 @@ import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.service.MemberGuard;
+import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,8 +52,18 @@ class AssignmentServiceTest {
         memberGuard = mock(MemberGuard.class);
         assignmentAttachmentRepository = mock(AssignmentAttachmentRepository.class);
         attachmentCleanup = mock(AssignmentAttachmentCleanup.class);
+        AttachmentStorageLifecycle lifecycle = mock(AttachmentStorageLifecycle.class);
+        ShortTransactionExecutor transactions = immediateTransactions();
         service = new AssignmentService(assignmentRepository, submissionRepository, memberGuard,
-                Clock.fixed(NOW, ZoneOffset.UTC), assignmentAttachmentRepository, attachmentCleanup);
+                Clock.fixed(NOW, ZoneOffset.UTC), assignmentAttachmentRepository, attachmentCleanup,
+                lifecycle, transactions);
+    }
+
+    private ShortTransactionExecutor immediateTransactions() {
+        ShortTransactionExecutor transactions = mock(ShortTransactionExecutor.class);
+        when(transactions.read(any())).thenAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(0)).get());
+        when(transactions.write(any(java.util.function.Supplier.class))).thenAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(0)).get());
+        return transactions;
     }
 
     @Test
@@ -235,6 +247,7 @@ class AssignmentServiceTest {
         Member admin = member(MemberRole.ADMIN);
         Assignment assignment = Assignment.create(admin, "제목", "내용", OffsetDateTime.now(), false);
         stubApprovedMember(7L, admin);
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(assignmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.existsByAssignmentId(1L)).thenReturn(false);
 
@@ -250,6 +263,7 @@ class AssignmentServiceTest {
         Member admin = member(MemberRole.ADMIN);
         Assignment assignment = Assignment.create(admin, "제목", "내용", OffsetDateTime.now(), false);
         stubApprovedMember(7L, admin);
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(assignmentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.existsByAssignmentId(1L)).thenReturn(true);
 

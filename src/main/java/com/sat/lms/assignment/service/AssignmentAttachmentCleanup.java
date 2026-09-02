@@ -35,7 +35,7 @@ public class AssignmentAttachmentCleanup {
         this.storageLifecycle = storageLifecycle;
     }
 
-    public void deleteOne(Long attachmentId) {
+    public List<String> deleteOne(Long attachmentId) {
         AssignmentAttachment link = assignmentAttachmentRepository
                 .findWithAssignmentAndAttachmentByAttachmentId(attachmentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_MESSAGE));
@@ -47,14 +47,15 @@ public class AssignmentAttachmentCleanup {
         if (!hasAnotherLink(attachmentId)) {
             attachmentRepository.delete(attachment);
             attachmentRepository.flush();
-            storageLifecycle.deleteAfterCommit(List.of(attachment.getStorageKey()));
+            return List.of(attachment.getStorageKey());
         }
+        return List.of();
     }
 
-    public void deleteAllForAssignment(Long assignmentId) {
+    public List<String> deleteAllForAssignment(Long assignmentId) {
         List<AssignmentAttachment> links = assignmentAttachmentRepository
                 .findWithAttachmentByAssignmentId(assignmentId);
-        if (links.isEmpty()) return;
+        if (links.isEmpty()) return List.of();
 
         List<Long> attachmentIds = links.stream()
                 .map(link -> link.getAttachment().getId()).sorted().toList();
@@ -78,8 +79,8 @@ public class AssignmentAttachmentCleanup {
         if (!metadataToDelete.isEmpty()) {
             attachmentRepository.deleteAll(metadataToDelete);
             attachmentRepository.flush();
-            storageLifecycle.deleteAfterCommit(storageKeysToDelete);
         }
+        return List.copyOf(storageKeysToDelete);
     }
 
     private boolean hasAnotherLink(Long attachmentId) {

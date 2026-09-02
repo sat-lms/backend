@@ -10,6 +10,8 @@ import com.sat.lms.attachment.repository.AssignmentAttachmentRepository;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.service.MemberGuard;
+import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -26,7 +28,6 @@ import java.time.ZoneId;
 import java.util.Set;
 
 @Service
-@Transactional(readOnly = true)
 public class AssignmentService {
     private static final ZoneId ASSIGNMENT_TIME_ZONE = ZoneId.of("Asia/Seoul");
     private static final Set<String> ALLOWED_SORT_FIELDS =
@@ -38,19 +39,25 @@ public class AssignmentService {
     private final Clock clock;
     private final AssignmentAttachmentRepository assignmentAttachmentRepository;
     private final AssignmentAttachmentCleanup attachmentCleanup;
+    private final AttachmentStorageLifecycle storageLifecycle;
+    private final ShortTransactionExecutor transactions;
 
     public AssignmentService(AssignmentRepository assignmentRepository,
                              SubmissionRepository submissionRepository,
                              MemberGuard memberGuard,
                              Clock clock,
                              AssignmentAttachmentRepository assignmentAttachmentRepository,
-                             AssignmentAttachmentCleanup attachmentCleanup) {
+                             AssignmentAttachmentCleanup attachmentCleanup,
+                             AttachmentStorageLifecycle storageLifecycle,
+                             ShortTransactionExecutor transactions) {
         this.assignmentRepository = assignmentRepository;
         this.submissionRepository = submissionRepository;
         this.memberGuard = memberGuard;
         this.clock = clock;
         this.assignmentAttachmentRepository = assignmentAttachmentRepository;
         this.attachmentCleanup = attachmentCleanup;
+        this.storageLifecycle = storageLifecycle;
+        this.transactions = transactions;
     }
 
     @Transactional
@@ -62,12 +69,14 @@ public class AssignmentService {
         return AssignmentDetailResponse.from(assignmentRepository.save(assignment));
     }
 
+    @Transactional(readOnly = true)
     public Page<AssignmentListResponse> getAssignments(Long memberId, Pageable pageable) {
         memberGuard.requireMember(memberId);
         return assignmentRepository.findAssignmentPage(PageRequest.of(
                 pageable.getPageNumber(), pageable.getPageSize(), validateSort(pageable.getSort())));
     }
 
+    @Transactional(readOnly = true)
     public AssignmentDetailResponse getAssignment(Long assignmentId, Long memberId) {
         memberGuard.requireMember(memberId);
         Assignment assignment = findAssignment(assignmentId);
@@ -93,17 +102,21 @@ public class AssignmentService {
         return AssignmentDetailResponse.from(assignment);
     }
 
-    @Transactional
     public void delete(Long assignmentId, Long memberId) {
-        memberGuard.requireAdmin(memberId);
-        Assignment assignment = assignmentRepository.findByIdForUpdate(assignmentId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
-        if (submissionRepository.existsByAssignmentId(assignmentId)) {
-            throw new BusinessException(HttpStatus.CONFLICT, "제출물이 존재하는 과제는 삭제할 수 없습니다.");
-        }
-        attachmentCleanup.deleteAllForAssignment(assignmentId);
-        assignmentRepository.delete(assignment);
-        assignmentRepository.flush();
+        transactions.requireNonTransactionalEntry();
+        transactions.read(() -> { memberGuard.requireAdmin(memberId); findAssignment(assignmentId); return null; });
+        var keys = transactions.write(() -> {
+            memberGuard.requireAdmin(memberId);
+            Assignment assignment = assignmentRepository.findByIdForUpdate(assignmentId)
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
+            if (submissionRepository.existsByAssignmentId(assignmentId))
+                throw new BusinessException(HttpStatus.CONFLICT, "제출물이 존재하는 과제는 삭제할 수 없습니다.");
+            var deletionKeys = attachmentCleanup.deleteAllForAssignment(assignmentId);
+            assignmentRepository.delete(assignment);
+            assignmentRepository.flush();
+            return deletionKeys;
+        });
+        storageLifecycle.delete(keys);
     }
 
     private Sort validateSort(Sort requestedSort) {

@@ -52,6 +52,10 @@ public class AttachmentStorageLifecycle {
         }
     }
 
+    public void delete(List<String> storageKeys) {
+        deleteQuietly(List.copyOf(storageKeys));
+    }
+
     private void deleteQuietly(List<String> storageKeys) {
         for (String storageKey : storageKeys) deleteWithRetry(storageKey);
     }

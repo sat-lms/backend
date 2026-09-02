@@ -10,6 +10,7 @@ import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.notice.dto.NoticeAttachmentDownloadUrlResponse;
 import com.sat.lms.notice.dto.NoticeAttachmentResponse;
@@ -24,7 +25,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Service
-@Transactional(readOnly = true)
 public class NoticeAttachmentService {
     private static final String NOT_FOUND_ATTACHMENT_MESSAGE = "존재하지 않는 공지 첨부파일입니다.";
 
@@ -36,6 +36,7 @@ public class NoticeAttachmentService {
     private final NoticeAttachmentCleanup cleanup;
     private final AttachmentFileValidator fileValidator;
     private final AttachmentStorageLifecycle storageLifecycle;
+    private final ShortTransactionExecutor transactions;
 
     public NoticeAttachmentService(NoticeRepository noticeRepository,
                                    NoticeAttachmentRepository noticeAttachmentRepository,
@@ -44,7 +45,8 @@ public class NoticeAttachmentService {
                                    FileStorage fileStorage,
                                    NoticeAttachmentCleanup cleanup,
                                    AttachmentFileValidator fileValidator,
-                                   AttachmentStorageLifecycle storageLifecycle) {
+                                   AttachmentStorageLifecycle storageLifecycle,
+                                   ShortTransactionExecutor transactions) {
         this.noticeRepository = noticeRepository;
         this.noticeAttachmentRepository = noticeAttachmentRepository;
         this.attachmentRepository = attachmentRepository;
@@ -53,42 +55,32 @@ public class NoticeAttachmentService {
         this.cleanup = cleanup;
         this.fileValidator = fileValidator;
         this.storageLifecycle = storageLifecycle;
+        this.transactions = transactions;
     }
 
-    @Transactional
     public List<NoticeAttachmentResponse> upload(Long noticeId, List<MultipartFile> files, Long memberId) {
-        memberGuard.requireAdmin(memberId);
+        transactions.requireNonTransactionalEntry();
+        transactions.read(() -> {
+            memberGuard.requireAdmin(memberId);
+            return null;
+        });
         fileValidator.validateList(files);
-        Notice notice = noticeRepository.findByIdForUpdate(noticeId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 공지사항입니다."));
-        long existingCount = noticeAttachmentRepository.countByNoticeId(noticeId);
-        if (existingCount + files.size() > AttachmentFileValidator.MAX_FILE_COUNT) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST,
-                    "공지 첨부파일은 최대 3개까지 등록할 수 있습니다.");
-        }
         fileValidator.validateContents(files);
+        transactions.read(() -> {
+            requireNoticeAndCapacity(noticeId, files.size(), false);
+            return null;
+        });
 
         List<StoredFile> uploaded = uploadAll(files, "notices/" + noticeId);
-        boolean rollbackCompensationRegistered = storageLifecycle.registerRollbackCompensation(uploaded);
         try {
-            List<Attachment> attachments = new ArrayList<>();
-            for (StoredFile stored : uploaded) {
-                attachments.add(attachmentRepository.save(Attachment.create(
-                        stored.originalName(), stored.storedName(), stored.storageKey(),
-                        stored.extension(), stored.sizeKb())));
-            }
-            attachmentRepository.flush();
-            for (Attachment attachment : attachments) {
-                noticeAttachmentRepository.save(NoticeAttachment.create(notice, attachment));
-            }
-            noticeAttachmentRepository.flush();
-            return attachments.stream().map(NoticeAttachmentResponse::from).toList();
+            return transactions.write(() -> saveUploaded(noticeId, memberId, uploaded));
         } catch (RuntimeException exception) {
-            if (!rollbackCompensationRegistered) storageLifecycle.compensate(uploaded);
+            storageLifecycle.compensate(uploaded);
             throw exception;
         }
     }
 
+    @Transactional(readOnly = true)
     public NoticeAttachmentDownloadUrlResponse getDownloadUrl(Long attachmentId, Long memberId) {
         memberGuard.requireMember(memberId);
         NoticeAttachment link = findNoticeAttachment(attachmentId);
@@ -98,10 +90,33 @@ public class NoticeAttachmentService {
                 downloadUrl.url(), downloadUrl.expiresInSeconds(), attachment.getOriginalName());
     }
 
-    @Transactional
     public void delete(Long attachmentId, Long memberId) {
+        transactions.requireNonTransactionalEntry();
+        List<String> keys = transactions.write(() -> {
+            memberGuard.requireAdmin(memberId);
+            return cleanup.deleteOne(attachmentId);
+        });
+        storageLifecycle.delete(keys);
+    }
+
+    private List<NoticeAttachmentResponse> saveUploaded(Long noticeId, Long memberId, List<StoredFile> uploaded) {
         memberGuard.requireAdmin(memberId);
-        cleanup.deleteOne(attachmentId);
+        Notice notice = requireNoticeAndCapacity(noticeId, uploaded.size(), true);
+        List<Attachment> attachments = new ArrayList<>();
+        for (StoredFile stored : uploaded) attachments.add(attachmentRepository.save(Attachment.create(
+                stored.originalName(), stored.storedName(), stored.storageKey(), stored.extension(), stored.sizeKb())));
+        attachmentRepository.flush();
+        for (Attachment attachment : attachments) noticeAttachmentRepository.save(NoticeAttachment.create(notice, attachment));
+        noticeAttachmentRepository.flush();
+        return attachments.stream().map(NoticeAttachmentResponse::from).toList();
+    }
+
+    private Notice requireNoticeAndCapacity(Long noticeId, int newCount, boolean lock) {
+        Notice notice = (lock ? noticeRepository.findByIdForUpdate(noticeId) : noticeRepository.findById(noticeId))
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 공지사항입니다."));
+        if (noticeAttachmentRepository.countByNoticeId(noticeId) + newCount > AttachmentFileValidator.MAX_FILE_COUNT)
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "공지 첨부파일은 최대 3개까지 등록할 수 있습니다.");
+        return notice;
     }
 
     private List<StoredFile> uploadAll(List<MultipartFile> files, String directory) {

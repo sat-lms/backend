@@ -16,6 +16,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -51,16 +52,12 @@ class AssignmentAttachmentCleanupTest {
         Attachment first = attachment(1L, "assignments/10/a.pdf");
         Attachment second = attachment(2L, "assignments/10/b.pdf");
         prepareAll(List.of(first, second));
-        TransactionSynchronizationManager.initSynchronization();
-
-        cleanup.deleteAllForAssignment(10L);
+        List<String> keys = cleanup.deleteAllForAssignment(10L);
 
         verify(assignmentAttachmentRepository).deleteAll(org.mockito.ArgumentMatchers.anyList());
         verify(attachmentRepository).deleteAll(List.of(first, second));
         verify(fileStorage, never()).delete(org.mockito.ArgumentMatchers.anyString());
-        commit();
-        verify(fileStorage).delete("assignments/10/a.pdf");
-        verify(fileStorage).delete("assignments/10/b.pdf");
+        assertThat(keys).containsExactly("assignments/10/a.pdf", "assignments/10/b.pdf");
     }
 
     @Test
@@ -69,13 +66,11 @@ class AssignmentAttachmentCleanupTest {
         Attachment shared = attachment(2L, "assignments/10/b.pdf");
         prepareAll(List.of(unshared, shared));
         when(noticeAttachmentRepository.countByAttachmentId(2L)).thenReturn(1L);
-        TransactionSynchronizationManager.initSynchronization();
-
-        cleanup.deleteAllForAssignment(10L);
-        commit();
+        List<String> keys = cleanup.deleteAllForAssignment(10L);
 
         verify(attachmentRepository).deleteAll(List.of(unshared));
-        verify(fileStorage).delete("assignments/10/a.pdf");
+        assertThat(keys).containsExactly("assignments/10/a.pdf");
+        verify(fileStorage, never()).delete("assignments/10/a.pdf");
         verify(fileStorage, never()).delete("assignments/10/b.pdf");
     }
 
@@ -87,9 +82,10 @@ class AssignmentAttachmentCleanupTest {
         when(assignmentAttachmentRepository.countByAttachmentId(1L)).thenReturn(1L);
         when(attachmentRepository.existsSubmissionLink(2L)).thenReturn(true);
 
-        cleanup.deleteAllForAssignment(10L);
+        List<String> keys = cleanup.deleteAllForAssignment(10L);
 
         verify(attachmentRepository, never()).deleteAll(org.mockito.ArgumentMatchers.anyList());
+        assertThat(keys).isEmpty();
         verify(fileStorage, never()).delete(org.mockito.ArgumentMatchers.anyString());
     }
 

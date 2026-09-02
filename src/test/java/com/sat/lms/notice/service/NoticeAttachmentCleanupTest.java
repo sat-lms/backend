@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -49,14 +50,11 @@ class NoticeAttachmentCleanupTest {
     @Test
     void unsharedSingleAttachmentDeletesMetadataAndStorageOnlyAfterCommit() {
         prepareSingle(false, false, false);
-        TransactionSynchronizationManager.initSynchronization();
-
-        cleanup.deleteOne(1L);
+        List<String> keys = cleanup.deleteOne(1L);
 
         verify(attachmentRepository).delete(any(Attachment.class));
+        assertThat(keys).containsExactly("notices/10/a.pdf");
         verify(fileStorage, never()).delete(any());
-        commit();
-        verify(fileStorage).delete("notices/10/a.pdf");
     }
 
     @Test
@@ -102,15 +100,12 @@ class NoticeAttachmentCleanupTest {
         when(noticeAttachmentRepository.findWithAttachmentByNoticeId(10L))
                 .thenReturn(List.of(firstLink, secondLink));
         when(attachmentRepository.findAllByIdForUpdate(List.of(1L, 2L))).thenReturn(List.of(first, second));
-        TransactionSynchronizationManager.initSynchronization();
-
-        cleanup.deleteAllForNotice(10L);
+        List<String> keys = cleanup.deleteAllForNotice(10L);
 
         verify(attachmentRepository).deleteAll(List.of(first, second));
         verify(fileStorage, never()).delete(any());
-        commit();
-        verify(fileStorage).delete("notices/10/a.pdf");
-        verify(fileStorage).delete("notices/10/b.pdf");
+        assertThat(keys).containsExactly("notices/10/a.pdf", "notices/10/b.pdf");
+        verify(fileStorage, never()).delete(any());
     }
 
     @Test
@@ -123,13 +118,11 @@ class NoticeAttachmentCleanupTest {
                 .thenReturn(List.of(unsharedLink, sharedLink));
         when(attachmentRepository.findAllByIdForUpdate(List.of(1L, 2L))).thenReturn(List.of(unshared, shared));
         when(attachmentRepository.existsAssignmentLink(2L)).thenReturn(true);
-        TransactionSynchronizationManager.initSynchronization();
-
-        cleanup.deleteAllForNotice(10L);
-        commit();
+        List<String> keys = cleanup.deleteAllForNotice(10L);
 
         verify(attachmentRepository).deleteAll(List.of(unshared));
-        verify(fileStorage).delete("notices/10/a.pdf");
+        assertThat(keys).containsExactly("notices/10/a.pdf");
+        verify(fileStorage, never()).delete("notices/10/a.pdf");
         verify(fileStorage, never()).delete("notices/10/b.pdf");
     }
 
@@ -149,13 +142,9 @@ class NoticeAttachmentCleanupTest {
     @Test
     void afterCommitStorageFailureIsRetriedAndDoesNotEscape() {
         prepareSingle(false, false, false);
-        doThrow(new RuntimeException("s3 failed")).when(fileStorage).delete(any());
-        TransactionSynchronizationManager.initSynchronization();
-        cleanup.deleteOne(1L);
-
-        commit();
-
-        verify(fileStorage, times(3)).delete("notices/10/a.pdf");
+        List<String> keys = cleanup.deleteOne(1L);
+        assertThat(keys).containsExactly("notices/10/a.pdf");
+        verify(fileStorage, never()).delete(any());
     }
 
     private void prepareSingle(boolean noticeShared, boolean assignmentShared, boolean submissionShared) {
