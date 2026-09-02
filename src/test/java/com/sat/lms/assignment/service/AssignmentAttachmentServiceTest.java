@@ -13,6 +13,7 @@ import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.service.MemberGuard;
@@ -52,6 +53,7 @@ class AssignmentAttachmentServiceTest {
     AttachmentStorageLifecycle lifecycle;
     AssignmentAttachmentCleanup cleanup;
     AssignmentAttachmentService service;
+    ShortTransactionExecutor transactions;
 
     @BeforeEach
     void setUp() {
@@ -62,11 +64,14 @@ class AssignmentAttachmentServiceTest {
         memberGuard = mock(MemberGuard.class);
         fileStorage = mock(FileStorage.class);
         lifecycle = new AttachmentStorageLifecycle(fileStorage);
+        transactions = mock(ShortTransactionExecutor.class);
+        when(transactions.read(any())).thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+        when(transactions.write(any(java.util.function.Supplier.class))).thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         cleanup = spy(new AssignmentAttachmentCleanup(
                 assignmentAttachmentRepository, noticeAttachmentRepository, attachmentRepository, lifecycle));
         service = new AssignmentAttachmentService(assignmentRepository, assignmentAttachmentRepository,
                 attachmentRepository, memberGuard, fileStorage,
-                new AttachmentFileValidator(), lifecycle, cleanup);
+                new AttachmentFileValidator(), lifecycle, cleanup, transactions);
     }
 
     @AfterEach
@@ -81,7 +86,7 @@ class AssignmentAttachmentServiceTest {
         prepareAdminAndAssignment();
         when(attachmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(fileStorage.upload(any(), anyString())).thenReturn(stored("a.pdf"), stored("b.pdf"), stored("c.pdf"));
-        when(assignmentAttachmentRepository.countByAssignmentId(10L)).thenReturn(0L, 1L, 2L);
+        when(assignmentAttachmentRepository.countByAssignmentId(10L)).thenReturn(0L, 0L, 1L, 1L, 2L, 2L);
 
         assertThat(service.upload(10L, List.of(file("a.pdf", 1), file("b.pdf", 1), file("c.pdf", 1)), 7L))
                 .hasSize(3);
@@ -163,9 +168,11 @@ class AssignmentAttachmentServiceTest {
         MultipartFile file = file("a.pdf", 1);
         when(fileStorage.upload(file, "assignments/10")).thenReturn(stored("a.pdf"));
         when(attachmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        TransactionSynchronizationManager.initSynchronization();
-        service.upload(10L, List.of(file), 7L);
-        complete(TransactionSynchronization.STATUS_ROLLED_BACK);
+        when(transactions.write(any(java.util.function.Supplier.class))).thenAnswer(invocation -> {
+            ((java.util.function.Supplier<?>) invocation.getArgument(0)).get();
+            throw new RuntimeException("rolled back");
+        });
+        assertThatThrownBy(() -> service.upload(10L, List.of(file), 7L)).hasMessage("rolled back");
         verify(fileStorage).delete("assignments/10/a.pdf");
 
         doThrow(new RuntimeException("cleanup failed")).when(fileStorage).delete(anyString());
@@ -218,10 +225,7 @@ class AssignmentAttachmentServiceTest {
         stubMember(8L, MemberRole.STUDENT);
         assertStatus(() -> service.delete(1L, 8L), HttpStatus.FORBIDDEN);
         prepareDelete(false, false, false);
-        TransactionSynchronizationManager.initSynchronization();
         service.delete(1L, 7L);
-        verify(fileStorage, never()).delete(anyString());
-        commit();
         verify(fileStorage).delete("assignments/10/a.pdf");
         verify(attachmentRepository).delete(any());
     }
@@ -307,7 +311,9 @@ class AssignmentAttachmentServiceTest {
 
     private void prepareAdminAndAssignment() {
         stubMember(7L, MemberRole.ADMIN);
-        when(assignmentRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(mock(Assignment.class)));
+        Assignment assignment = mock(Assignment.class);
+        when(assignmentRepository.findById(10L)).thenReturn(Optional.of(assignment));
+        when(assignmentRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(assignment));
     }
 
     private void prepareDelete(boolean noticeShared, boolean assignmentShared, boolean submissionShared) {

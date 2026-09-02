@@ -14,6 +14,7 @@ import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.member.service.MemberGuard;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -24,7 +25,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Service
-@Transactional(readOnly = true)
 public class AssignmentAttachmentService {
     private static final String NOT_FOUND_MESSAGE = "존재하지 않는 과제 첨부파일입니다.";
 
@@ -36,6 +36,7 @@ public class AssignmentAttachmentService {
     private final AttachmentFileValidator fileValidator;
     private final AttachmentStorageLifecycle storageLifecycle;
     private final AssignmentAttachmentCleanup cleanup;
+    private final ShortTransactionExecutor transactions;
 
     public AssignmentAttachmentService(AssignmentRepository assignmentRepository,
                                        AssignmentAttachmentRepository assignmentAttachmentRepository,
@@ -44,7 +45,8 @@ public class AssignmentAttachmentService {
                                        FileStorage fileStorage,
                                        AttachmentFileValidator fileValidator,
                                        AttachmentStorageLifecycle storageLifecycle,
-                                       AssignmentAttachmentCleanup cleanup) {
+                                       AssignmentAttachmentCleanup cleanup,
+                                       ShortTransactionExecutor transactions) {
         this.assignmentRepository = assignmentRepository;
         this.assignmentAttachmentRepository = assignmentAttachmentRepository;
         this.attachmentRepository = attachmentRepository;
@@ -53,42 +55,26 @@ public class AssignmentAttachmentService {
         this.fileValidator = fileValidator;
         this.storageLifecycle = storageLifecycle;
         this.cleanup = cleanup;
+        this.transactions = transactions;
     }
 
-    @Transactional
     public List<AssignmentAttachmentResponse> upload(Long assignmentId, List<MultipartFile> files, Long memberId) {
-        memberGuard.requireAdmin(memberId);
+        transactions.requireNonTransactionalEntry();
+        transactions.read(() -> { memberGuard.requireAdmin(memberId); return null; });
         fileValidator.validateList(files);
-        Assignment assignment = assignmentRepository.findByIdForUpdate(assignmentId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
-        long existingCount = assignmentAttachmentRepository.countByAssignmentId(assignmentId);
-        if (existingCount + files.size() > AttachmentFileValidator.MAX_FILE_COUNT) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST,
-                    "과제 첨부파일은 최대 3개까지 등록할 수 있습니다.");
-        }
         fileValidator.validateContents(files);
+        transactions.read(() -> { requireAssignment(assignmentId, files.size(), false); return null; });
 
         List<StoredFile> uploaded = uploadAll(files, "assignments/" + assignmentId);
-        boolean rollbackRegistered = storageLifecycle.registerRollbackCompensation(uploaded);
         try {
-            List<Attachment> attachments = new ArrayList<>();
-            for (StoredFile stored : uploaded) {
-                attachments.add(attachmentRepository.save(Attachment.create(
-                        stored.originalName(), stored.storedName(), stored.storageKey(),
-                        stored.extension(), stored.sizeKb())));
-            }
-            attachmentRepository.flush();
-            for (Attachment attachment : attachments) {
-                assignmentAttachmentRepository.save(AssignmentAttachment.create(assignment, attachment));
-            }
-            assignmentAttachmentRepository.flush();
-            return attachments.stream().map(AssignmentAttachmentResponse::from).toList();
+            return transactions.write(() -> saveUploaded(assignmentId, memberId, uploaded));
         } catch (RuntimeException exception) {
-            if (!rollbackRegistered) storageLifecycle.compensate(uploaded);
+            storageLifecycle.compensate(uploaded);
             throw exception;
         }
     }
 
+    @Transactional(readOnly = true)
     public AssignmentAttachmentDownloadUrlResponse getDownloadUrl(Long attachmentId, Long memberId) {
         memberGuard.requireMember(memberId);
         AssignmentAttachment link = findAssignmentAttachment(attachmentId);
@@ -98,10 +84,30 @@ public class AssignmentAttachmentService {
                 downloadUrl.url(), downloadUrl.expiresInSeconds(), attachment.getOriginalName());
     }
 
-    @Transactional
     public void delete(Long attachmentId, Long memberId) {
+        transactions.requireNonTransactionalEntry();
+        List<String> keys = transactions.write(() -> { memberGuard.requireAdmin(memberId); return cleanup.deleteOne(attachmentId); });
+        storageLifecycle.delete(keys);
+    }
+
+    private List<AssignmentAttachmentResponse> saveUploaded(Long assignmentId, Long memberId, List<StoredFile> uploaded) {
         memberGuard.requireAdmin(memberId);
-        cleanup.deleteOne(attachmentId);
+        Assignment assignment = requireAssignment(assignmentId, uploaded.size(), true);
+        List<Attachment> attachments = new ArrayList<>();
+        for (StoredFile stored : uploaded) attachments.add(attachmentRepository.save(Attachment.create(
+                stored.originalName(), stored.storedName(), stored.storageKey(), stored.extension(), stored.sizeKb())));
+        attachmentRepository.flush();
+        for (Attachment attachment : attachments) assignmentAttachmentRepository.save(AssignmentAttachment.create(assignment, attachment));
+        assignmentAttachmentRepository.flush();
+        return attachments.stream().map(AssignmentAttachmentResponse::from).toList();
+    }
+
+    private Assignment requireAssignment(Long id, int added, boolean lock) {
+        Assignment assignment = (lock ? assignmentRepository.findByIdForUpdate(id) : assignmentRepository.findById(id))
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
+        if (assignmentAttachmentRepository.countByAssignmentId(id) + added > AttachmentFileValidator.MAX_FILE_COUNT)
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "과제 첨부파일은 최대 3개까지 등록할 수 있습니다.");
+        return assignment;
     }
 
     private List<StoredFile> uploadAll(List<MultipartFile> files, String directory) {

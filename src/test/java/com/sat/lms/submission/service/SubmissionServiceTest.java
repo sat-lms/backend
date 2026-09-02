@@ -6,10 +6,12 @@ import com.sat.lms.attachment.entity.Attachment;
 import com.sat.lms.attachment.entity.SubmissionAttachment;
 import com.sat.lms.attachment.repository.AttachmentRepository;
 import com.sat.lms.attachment.repository.SubmissionAttachmentRepository;
+import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.service.MemberGuard;
@@ -42,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
@@ -57,6 +60,8 @@ class SubmissionServiceTest {
     AttachmentRepository attachmentRepository;
     SubmissionAttachmentRepository submissionAttachmentRepository;
     FileStorage fileStorage;
+    AttachmentStorageLifecycle storageLifecycle;
+    ShortTransactionExecutor transactions;
     SubmissionService service;
 
     @BeforeEach
@@ -67,8 +72,27 @@ class SubmissionServiceTest {
         attachmentRepository = mock(AttachmentRepository.class);
         submissionAttachmentRepository = mock(SubmissionAttachmentRepository.class);
         fileStorage = mock(FileStorage.class);
+        storageLifecycle = new AttachmentStorageLifecycle(fileStorage);
+        transactions = mock(ShortTransactionExecutor.class);
+        when(transactions.read(any())).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+        when(transactions.write(any(java.util.function.Supplier.class))).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+        when(transactions.writeWithRollbackConfirmation(any())).thenAnswer(invocation -> {
+            try {
+                return ((java.util.function.Supplier<?>) invocation.getArgument(0)).get();
+            } catch (RuntimeException exception) {
+                throw new ShortTransactionExecutor.ConfirmedRollbackException(exception);
+            }
+        });
+        when(assignmentRepository.findByIdForUpdate(any())).thenAnswer(invocation ->
+                assignmentRepository.findById(invocation.getArgument(0)));
+        when(submissionRepository.findByAssignmentIdAndStudentIdForUpdate(any(), any())).thenAnswer(invocation ->
+                submissionRepository.findByAssignmentIdAndStudentId(
+                        invocation.getArgument(0), invocation.getArgument(1)));
         service = new SubmissionService(submissionRepository, assignmentRepository, memberGuard,
-                attachmentRepository, submissionAttachmentRepository, fileStorage, Clock.systemUTC());
+                attachmentRepository, submissionAttachmentRepository, fileStorage, Clock.systemUTC(),
+                storageLifecycle, transactions);
 
         when(submissionRepository.save(any())).thenAnswer(invocation -> {
             Submission submission = invocation.getArgument(0);
@@ -94,14 +118,14 @@ class SubmissionServiceTest {
     void studentCanSubmitFilesOnly() {
         givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
         MultipartFile file = multipartFile("Member.java", 1024);
-        when(fileStorage.upload(eq(file), eq("submissions/42"))).thenReturn(
+        when(fileStorage.upload(eq(file), startsWith("submissions/"))).thenReturn(
                 new StoredFile("Member.java", "uuid.java", "submissions/42/uuid.java", "java", 1L));
 
         var response = service.submit(1L, 3L, request(null), List.of(file));
 
         assertThat(response.getFiles()).hasSize(1);
         assertThat(response.getFiles().get(0).getOriginalName()).isEqualTo("Member.java");
-        verify(fileStorage).upload(file, "submissions/42");
+        verify(fileStorage).upload(eq(file), startsWith("submissions/"));
         verify(attachmentRepository).saveAll(any());
         verify(submissionAttachmentRepository).saveAll(any());
     }
@@ -110,7 +134,7 @@ class SubmissionServiceTest {
     void studentCanSubmitTextAndFiles() {
         givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
         MultipartFile file = multipartFile("결과.png", 2048);
-        when(fileStorage.upload(eq(file), eq("submissions/42"))).thenReturn(
+        when(fileStorage.upload(eq(file), startsWith("submissions/"))).thenReturn(
                 new StoredFile("결과.png", "uuid.png", "submissions/42/uuid.png", "png", 2L));
 
         var response = service.submit(1L, 3L, request("텍스트"), List.of(file));
@@ -307,8 +331,8 @@ class SubmissionServiceTest {
         MultipartFile fileB = multipartFile("b.txt", 10);
         StoredFile storedA = new StoredFile("a.txt", "uuidA.txt", "submissions/42/uuidA.txt", "txt", 1L);
         StoredFile storedB = new StoredFile("b.txt", "uuidB.txt", "submissions/42/uuidB.txt", "txt", 1L);
-        when(fileStorage.upload(fileA, "submissions/42")).thenReturn(storedA);
-        when(fileStorage.upload(fileB, "submissions/42")).thenReturn(storedB);
+        when(fileStorage.upload(eq(fileA), startsWith("submissions/"))).thenReturn(storedA);
+        when(fileStorage.upload(eq(fileB), startsWith("submissions/"))).thenReturn(storedB);
         when(attachmentRepository.saveAll(any())).thenThrow(new DataIntegrityViolationException("boom"));
 
         assertThatThrownBy(() -> service.submit(1L, 3L, request(null), List.of(fileA, fileB)))
@@ -323,7 +347,7 @@ class SubmissionServiceTest {
         givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
         MultipartFile file = multipartFile("a.txt", 10);
         StoredFile stored = new StoredFile("a.txt", "uuidA.txt", "submissions/42/uuidA.txt", "txt", 1L);
-        when(fileStorage.upload(file, "submissions/42")).thenReturn(stored);
+        when(fileStorage.upload(eq(file), startsWith("submissions/"))).thenReturn(stored);
         // saveAll() succeeds (e.g. a deferred constraint), but the actual INSERT only fails at flush time.
         org.mockito.Mockito.doThrow(new DataIntegrityViolationException("boom"))
                 .when(submissionAttachmentRepository).flush();
@@ -341,7 +365,7 @@ class SubmissionServiceTest {
         givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
         MultipartFile file = multipartFile("a.txt", 10);
         StoredFile stored = new StoredFile("a.txt", "uuidA.txt", "submissions/42/uuidA.txt", "txt", 1L);
-        when(fileStorage.upload(file, "submissions/42")).thenReturn(stored);
+        when(fileStorage.upload(eq(file), startsWith("submissions/"))).thenReturn(stored);
         when(attachmentRepository.saveAll(any())).thenThrow(new DataIntegrityViolationException("boom"));
         doThrow(new RuntimeException("s3 unreachable")).when(fileStorage).delete(anyString());
 
@@ -356,7 +380,7 @@ class SubmissionServiceTest {
         givenStudentAndAssignment(3L, false, OffsetDateTime.now().plusDays(1));
         MultipartFile file = multipartFile("a.txt", 10);
         StoredFile stored = new StoredFile("a.txt", "uuidA.txt", "submissions/42/uuidA.txt", "txt", 1L);
-        when(fileStorage.upload(file, "submissions/42")).thenReturn(stored);
+        when(fileStorage.upload(eq(file), startsWith("submissions/"))).thenReturn(stored);
         when(attachmentRepository.saveAll(any())).thenThrow(new DataIntegrityViolationException("boom"));
         doThrow(new RuntimeException("transient"))
                 .doThrow(new RuntimeException("transient"))
@@ -485,13 +509,13 @@ class SubmissionServiceTest {
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(oldLink));
         MultipartFile newFile = multipartFile("new.txt", 10);
         StoredFile storedNew = new StoredFile("new.txt", "uuidNew.txt", "submissions/5/uuidNew.txt", "txt", 1L);
-        when(fileStorage.upload(newFile, "submissions/5")).thenReturn(storedNew);
+        when(fileStorage.upload(eq(newFile), startsWith("submissions/"))).thenReturn(storedNew);
 
         var response = service.resubmit(1L, 3L, request(null), List.of(newFile));
 
         assertThat(response.getFiles()).hasSize(1);
         assertThat(response.getFiles().get(0).getOriginalName()).isEqualTo("new.txt");
-        verify(fileStorage).upload(newFile, "submissions/5");
+        verify(fileStorage).upload(eq(newFile), startsWith("submissions/"));
         verify(fileStorage).delete("submissions/5/old.txt");
         verify(fileStorage, never()).delete("submissions/5/uuidNew.txt");
     }
@@ -534,7 +558,7 @@ class SubmissionServiceTest {
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(oldLink));
         MultipartFile newFile = multipartFile("new.txt", 10);
         StoredFile storedNew = new StoredFile("new.txt", "uuidNew.txt", "submissions/5/uuidNew.txt", "txt", 1L);
-        when(fileStorage.upload(newFile, "submissions/5")).thenReturn(storedNew);
+        when(fileStorage.upload(eq(newFile), startsWith("submissions/"))).thenReturn(storedNew);
         when(submissionAttachmentRepository.saveAll(any())).thenThrow(new DataIntegrityViolationException("boom"));
 
         assertThatThrownBy(() -> service.resubmit(1L, 3L, request(null), List.of(newFile)))
@@ -555,6 +579,7 @@ class SubmissionServiceTest {
         SubmissionAttachment link1 = SubmissionAttachment.create(submission, attachment1);
         SubmissionAttachment link2 = SubmissionAttachment.create(submission, attachment2);
         stubApprovedMember(3L, student);
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L))
                 .thenReturn(List.of(link1, link2));
@@ -576,6 +601,7 @@ class SubmissionServiceTest {
         Attachment attachmentEntity = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, attachmentEntity);
         stubApprovedMember(3L, student);
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(link));
         doThrow(new RuntimeException("transient"))
@@ -596,6 +622,7 @@ class SubmissionServiceTest {
         Attachment attachmentEntity = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, attachmentEntity);
         stubApprovedMember(3L, student);
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
         when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionId(5L)).thenReturn(List.of(link));
         doThrow(new RuntimeException("permanent")).when(fileStorage).delete("submissions/5/a.txt");
@@ -625,6 +652,7 @@ class SubmissionServiceTest {
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
         stubApprovedMember(3L, student);
+        givenLockedSubmission(assignment, submission);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(fileStorage.createDownloadUrl("submissions/5/a.txt"))
@@ -697,6 +725,7 @@ class SubmissionServiceTest {
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
         stubApprovedMember(3L, student);
+        givenLockedSubmission(assignment, submission);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(2L);
@@ -716,6 +745,7 @@ class SubmissionServiceTest {
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
         stubApprovedMember(3L, student);
+        givenLockedSubmission(assignment, submission);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(1L);
@@ -737,6 +767,7 @@ class SubmissionServiceTest {
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
         stubApprovedMember(3L, student);
+        givenLockedSubmission(assignment, submission);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(1L);
@@ -783,6 +814,7 @@ class SubmissionServiceTest {
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
         stubApprovedMember(3L, student);
+        givenLockedSubmission(assignment, submission);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
 
@@ -800,6 +832,7 @@ class SubmissionServiceTest {
         Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
         stubApprovedMember(3L, student);
+        givenLockedSubmission(assignment, submission);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
         when(submissionAttachmentRepository.countBySubmissionId(5L)).thenReturn(2L);
@@ -829,6 +862,11 @@ class SubmissionServiceTest {
         Assignment assignment = assignment(allowLate, dueAt);
         stubApprovedMember(memberId, student);
         when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
+    }
+
+    private void givenLockedSubmission(Assignment assignment, Submission submission) {
+        when(assignmentRepository.findById(1L)).thenReturn(Optional.of(assignment));
+        when(submissionRepository.findByAssignmentIdAndStudentId(1L, 3L)).thenReturn(Optional.of(submission));
     }
 
     private SubmissionCreateRequest request(String textContent) {
@@ -879,7 +917,8 @@ class SubmissionServiceTest {
 
     private void useClock(Clock clock) {
         service = new SubmissionService(submissionRepository, assignmentRepository, memberGuard,
-                attachmentRepository, submissionAttachmentRepository, fileStorage, clock);
+                attachmentRepository, submissionAttachmentRepository, fileStorage, clock,
+                storageLifecycle, transactions);
     }
 
     private void stubApprovedMember(Long memberId, Member member) {

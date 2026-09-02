@@ -32,7 +32,7 @@ public class NoticeAttachmentCleanup {
         this.storageLifecycle = storageLifecycle;
     }
 
-    public void deleteOne(Long attachmentId) {
+    public List<String> deleteOne(Long attachmentId) {
         NoticeAttachment link = noticeAttachmentRepository
                 .findWithNoticeAndAttachmentByAttachmentId(attachmentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_ATTACHMENT_MESSAGE));
@@ -44,13 +44,14 @@ public class NoticeAttachmentCleanup {
         if (!hasAnotherLink(attachmentId)) {
             attachmentRepository.delete(attachment);
             attachmentRepository.flush();
-            storageLifecycle.deleteAfterCommit(List.of(attachment.getStorageKey()));
+            return List.of(attachment.getStorageKey());
         }
+        return List.of();
     }
 
-    public void deleteAllForNotice(Long noticeId) {
+    public List<String> deleteAllForNotice(Long noticeId) {
         List<NoticeAttachment> links = noticeAttachmentRepository.findWithAttachmentByNoticeId(noticeId);
-        if (links.isEmpty()) return;
+        if (links.isEmpty()) return List.of();
 
         List<Long> attachmentIds = links.stream()
                 .map(link -> link.getAttachment().getId())
@@ -77,8 +78,8 @@ public class NoticeAttachmentCleanup {
         if (!metadataToDelete.isEmpty()) {
             attachmentRepository.deleteAll(metadataToDelete);
             attachmentRepository.flush();
-            storageLifecycle.deleteAfterCommit(storageKeysToDelete);
         }
+        return List.copyOf(storageKeysToDelete);
     }
 
     public void compensate(List<StoredFile> uploaded) {

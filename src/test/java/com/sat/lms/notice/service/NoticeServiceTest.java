@@ -4,6 +4,8 @@ import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.service.MemberGuard;
+import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.notice.dto.NoticeCreateRequest;
 import com.sat.lms.notice.dto.NoticeListResponse;
 import com.sat.lms.notice.dto.NoticeUpdateRequest;
@@ -48,8 +50,17 @@ class NoticeServiceTest {
         memberGuard = mock(MemberGuard.class);
         attachmentCleanup = mock(NoticeAttachmentCleanup.class);
         noticeAttachmentRepository = mock(NoticeAttachmentRepository.class);
+        AttachmentStorageLifecycle lifecycle = mock(AttachmentStorageLifecycle.class);
+        ShortTransactionExecutor transactions = immediateTransactions();
         service = new NoticeService(noticeRepository, noticeReadRepository, memberGuard,
-                attachmentCleanup, noticeAttachmentRepository);
+                attachmentCleanup, noticeAttachmentRepository, lifecycle, transactions);
+    }
+
+    private ShortTransactionExecutor immediateTransactions() {
+        ShortTransactionExecutor transactions = mock(ShortTransactionExecutor.class);
+        when(transactions.read(any())).thenAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(0)).get());
+        when(transactions.write(any(java.util.function.Supplier.class))).thenAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(0)).get());
+        return transactions;
     }
 
     @Test
@@ -244,6 +255,7 @@ class NoticeServiceTest {
         Member admin = admin();
         Notice notice = notice();
         when(memberGuard.requireAdmin(7L)).thenReturn(admin);
+        when(noticeRepository.findWithAdminById(1L)).thenReturn(Optional.of(notice));
         when(noticeRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(notice));
 
         service.delete(1L, 7L);

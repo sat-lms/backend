@@ -10,6 +10,7 @@ import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.service.MemberGuard;
@@ -52,6 +53,7 @@ class NoticeAttachmentServiceTest {
     NoticeAttachmentCleanup cleanup;
     AttachmentStorageLifecycle storageLifecycle;
     NoticeAttachmentService service;
+    ShortTransactionExecutor transactions;
 
     @BeforeEach
     void setUp() {
@@ -61,10 +63,15 @@ class NoticeAttachmentServiceTest {
         memberGuard = mock(MemberGuard.class);
         fileStorage = mock(FileStorage.class);
         storageLifecycle = new AttachmentStorageLifecycle(fileStorage);
+        transactions = mock(ShortTransactionExecutor.class);
+        when(transactions.read(any())).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+        when(transactions.write(any(java.util.function.Supplier.class))).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         cleanup = spy(new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle));
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
                 attachmentRepository, memberGuard, fileStorage, cleanup,
-                new AttachmentFileValidator(), storageLifecycle);
+                new AttachmentFileValidator(), storageLifecycle, transactions);
     }
 
     @AfterEach
@@ -224,7 +231,7 @@ class NoticeAttachmentServiceTest {
         cleanup = spy(new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle));
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
                 attachmentRepository, memberGuard, fileStorage, cleanup,
-                new AttachmentFileValidator(), storageLifecycle);
+                new AttachmentFileValidator(), storageLifecycle, transactions);
         when(attachmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(noticeAttachmentRepository.save(any())).thenThrow(new RuntimeException("link db failed"));
         assertThatThrownBy(() -> service.upload(10L, List.of(file), 7L)).hasMessage("link db failed");
@@ -251,10 +258,11 @@ class NoticeAttachmentServiceTest {
         MultipartFile file = file("a.pdf", 1);
         when(fileStorage.upload(file, "notices/10")).thenReturn(stored("a.pdf", "a.pdf", 1L));
         when(attachmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        TransactionSynchronizationManager.initSynchronization();
-
-        service.upload(10L, List.of(file), 7L);
-        complete(TransactionSynchronization.STATUS_ROLLED_BACK);
+        when(transactions.write(any(java.util.function.Supplier.class))).thenAnswer(invocation -> {
+            ((java.util.function.Supplier<?>) invocation.getArgument(0)).get();
+            throw new RuntimeException("rolled back");
+        });
+        assertThatThrownBy(() -> service.upload(10L, List.of(file), 7L)).hasMessage("rolled back");
 
         verify(fileStorage).delete("notices/10/a.pdf");
     }
@@ -288,12 +296,7 @@ class NoticeAttachmentServiceTest {
     @Test
     void adminDeleteRunsStorageDeleteOnlyAfterCommit() {
         prepareDelete(false);
-        TransactionSynchronizationManager.initSynchronization();
-
         service.delete(1L, 7L);
-        verify(fileStorage, never()).delete(anyString());
-        commit();
-
         verify(fileStorage).delete("notices/10/a.pdf");
         verify(noticeAttachmentRepository).delete(any());
         verify(attachmentRepository).delete(any());
@@ -313,12 +316,12 @@ class NoticeAttachmentServiceTest {
     @Test
     void rollbackKeepsStorageAndSharedAttachmentKeepsMetadataAndStorage() {
         prepareDelete(false);
-        TransactionSynchronizationManager.initSynchronization();
-        service.delete(1L, 7L);
-        complete(TransactionSynchronization.STATUS_ROLLED_BACK);
+        when(transactions.write(any(java.util.function.Supplier.class))).thenThrow(new RuntimeException("rolled back"));
+        assertThatThrownBy(() -> service.delete(1L, 7L)).hasMessage("rolled back");
         verify(fileStorage, never()).delete(anyString());
 
-        clearSynchronization();
+        when(transactions.write(any(java.util.function.Supplier.class))).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         clearInvocations(attachmentRepository, noticeAttachmentRepository, fileStorage);
         prepareDelete(true);
         service.delete(1L, 7L);
@@ -376,6 +379,7 @@ class NoticeAttachmentServiceTest {
     private void prepareAdminAndNotice() {
         stubMember(7L, MemberRole.ADMIN);
         Notice notice = mock(Notice.class);
+        when(noticeRepository.findById(10L)).thenReturn(Optional.of(notice));
         when(noticeRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(notice));
     }
 

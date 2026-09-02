@@ -12,6 +12,8 @@ import com.sat.lms.notice.repository.NoticeRepository;
 import com.sat.lms.attachment.repository.NoticeAttachmentRepository;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.service.MemberGuard;
+import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -25,29 +27,36 @@ import java.time.ZoneOffset;
 import static com.sat.lms.notice.entity.Notice.TITLE_MAX_LENGTH;
 
 @Service
-@Transactional(readOnly = true)
 public class NoticeService {
     private final NoticeRepository noticeRepository;
     private final NoticeReadRepository noticeReadRepository;
     private final MemberGuard memberGuard;
     private final NoticeAttachmentCleanup attachmentCleanup;
     private final NoticeAttachmentRepository noticeAttachmentRepository;
+    private final AttachmentStorageLifecycle storageLifecycle;
+    private final ShortTransactionExecutor transactions;
 
     public NoticeService(NoticeRepository noticeRepository, NoticeReadRepository noticeReadRepository,
                          MemberGuard memberGuard, NoticeAttachmentCleanup attachmentCleanup,
-                         NoticeAttachmentRepository noticeAttachmentRepository) {
+                         NoticeAttachmentRepository noticeAttachmentRepository,
+                         AttachmentStorageLifecycle storageLifecycle,
+                         ShortTransactionExecutor transactions) {
         this.noticeRepository = noticeRepository;
         this.noticeReadRepository = noticeReadRepository;
         this.memberGuard = memberGuard;
         this.attachmentCleanup = attachmentCleanup;
         this.noticeAttachmentRepository = noticeAttachmentRepository;
+        this.storageLifecycle = storageLifecycle;
+        this.transactions = transactions;
     }
 
+    @Transactional(readOnly = true)
     public Page<NoticeListResponse> getNotices(Long memberId, boolean unreadOnly, Pageable pageable) {
         Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
         return noticeRepository.findNoticePage(memberId, unreadOnly, unsorted);
     }
 
+    @Transactional(readOnly = true)
     public UnreadCountResponse getUnreadCount(Long memberId) {
         return new UnreadCountResponse(noticeRepository.countUnreadByMemberId(memberId));
     }
@@ -86,14 +95,18 @@ public class NoticeService {
                 noticeAttachmentRepository.findWithAttachmentByNoticeId(noticeId));
     }
 
-    @Transactional
     public void delete(Long noticeId, Long memberId) {
-        memberGuard.requireAdmin(memberId);
-        Notice notice = noticeRepository.findByIdForUpdate(noticeId)
-                .orElseThrow(this::noticeNotFound);
-        attachmentCleanup.deleteAllForNotice(noticeId);
-        noticeRepository.delete(notice);
-        noticeRepository.flush();
+        transactions.requireNonTransactionalEntry();
+        transactions.read(() -> { memberGuard.requireAdmin(memberId); getNoticeWithAdmin(noticeId); return null; });
+        var keys = transactions.write(() -> {
+            memberGuard.requireAdmin(memberId);
+            Notice notice = noticeRepository.findByIdForUpdate(noticeId).orElseThrow(this::noticeNotFound);
+            var deletionKeys = attachmentCleanup.deleteAllForNotice(noticeId);
+            noticeRepository.delete(notice);
+            noticeRepository.flush();
+            return deletionKeys;
+        });
+        storageLifecycle.delete(keys);
     }
 
     private void validateUpdate(NoticeUpdateRequest request) {

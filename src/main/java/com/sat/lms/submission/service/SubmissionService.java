@@ -11,6 +11,8 @@ import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.FileExtensionExtractor;
 import com.sat.lms.global.storage.StoredFile;
+import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
+import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.service.MemberGuard;
@@ -21,19 +23,16 @@ import com.sat.lms.submission.dto.SubmissionFileResponse;
 import com.sat.lms.submission.dto.SubmissionListResponse;
 import com.sat.lms.submission.entity.Submission;
 import com.sat.lms.submission.repository.SubmissionRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Clock;
+import java.util.UUID;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -41,12 +40,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
-@Transactional(readOnly = true)
 public class SubmissionService {
-    private static final Logger log = LoggerFactory.getLogger(SubmissionService.class);
     private static final int MAX_FILE_COUNT = 5;
-    private static final int MAX_DELETE_ATTEMPTS = 3;
-    private static final long DELETE_RETRY_DELAY_MILLIS = 100;
     private static final long MAX_FILE_SIZE_BYTES = 50L * 1024 * 1024;
     private static final long MAX_TOTAL_SIZE_BYTES = 100L * 1024 * 1024;
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
@@ -66,11 +61,14 @@ public class SubmissionService {
     private final SubmissionAttachmentRepository submissionAttachmentRepository;
     private final FileStorage fileStorage;
     private final Clock clock;
+    private final AttachmentStorageLifecycle storageLifecycle;
+    private final ShortTransactionExecutor transactions;
 
     public SubmissionService(SubmissionRepository submissionRepository, AssignmentRepository assignmentRepository,
                              MemberGuard memberGuard, AttachmentRepository attachmentRepository,
                              SubmissionAttachmentRepository submissionAttachmentRepository, FileStorage fileStorage,
-                             Clock clock) {
+                             Clock clock, AttachmentStorageLifecycle storageLifecycle,
+                             ShortTransactionExecutor transactions) {
         this.submissionRepository = submissionRepository;
         this.assignmentRepository = assignmentRepository;
         this.memberGuard = memberGuard;
@@ -78,8 +76,11 @@ public class SubmissionService {
         this.submissionAttachmentRepository = submissionAttachmentRepository;
         this.fileStorage = fileStorage;
         this.clock = clock;
+        this.storageLifecycle = storageLifecycle;
+        this.transactions = transactions;
     }
 
+    @Transactional(readOnly = true)
     public SubmissionDetailResponse getMySubmission(Long assignmentId, Long memberId) {
         memberGuard.requireStudent(memberId);
         Submission submission = submissionRepository.findByAssignmentIdAndStudentId(assignmentId, memberId)
@@ -91,12 +92,10 @@ public class SubmissionService {
         return SubmissionDetailResponse.from(submission, attachments);
     }
 
-    @Transactional
     public SubmissionDetailResponse submit(Long assignmentId, Long memberId, SubmissionCreateRequest request,
                                            List<MultipartFile> files) {
-        Member student = memberGuard.requireStudent(memberId);
-        Assignment assignment = requireAssignment(assignmentId);
-
+        transactions.requireNonTransactionalEntry();
+        transactions.read(() -> memberGuard.requireStudent(memberId));
         String textContent = normalizeText(request);
         boolean hasText = hasText(textContent);
         List<MultipartFile> submittedFiles = files == null ? List.of() : files;
@@ -106,42 +105,31 @@ public class SubmissionService {
         }
         validateFiles(submittedFiles);
 
-        boolean late = determineLateAndRequireEditable(assignment);
-
-        Submission submission = submissionRepository.save(
-                Submission.create(assignment, student, hasText ? textContent : null, late));
+        DeadlineSnapshot deadline = transactions.read(() -> snapshotDeadline(requireAssignment(assignmentId)));
 
         List<StoredFile> uploaded = new ArrayList<>();
         try {
-            String directory = "submissions/" + submission.getId();
+            String directory = "submissions/" + UUID.randomUUID();
             for (MultipartFile file : submittedFiles) {
                 uploaded.add(fileStorage.upload(file, directory));
             }
-            List<Attachment> attachments = uploaded.stream()
-                    .map(stored -> Attachment.create(stored.originalName(), stored.storedName(),
-                            stored.storageKey(), stored.extension(), stored.sizeKb()))
-                    .toList();
-            attachmentRepository.saveAll(attachments);
-            attachmentRepository.flush();
-            submissionAttachmentRepository.saveAll(attachments.stream()
-                    .map(attachment -> SubmissionAttachment.create(submission, attachment))
-                    .toList());
-            submissionAttachmentRepository.flush();
-            return SubmissionDetailResponse.from(submission, attachments);
         } catch (RuntimeException e) {
             compensate(uploaded);
             throw e;
         }
+        try {
+            return transactions.writeWithRollbackConfirmation(() -> saveNewSubmission(assignmentId, memberId,
+                    hasText ? textContent : null, deadline.late(), uploaded));
+        } catch (ShortTransactionExecutor.ConfirmedRollbackException e) {
+            compensate(uploaded);
+            throw e.originalException();
+        }
     }
 
-    @Transactional
     public SubmissionDetailResponse resubmit(Long assignmentId, Long memberId, SubmissionCreateRequest request,
                                              List<MultipartFile> files) {
-        memberGuard.requireStudent(memberId);
-        Assignment assignment = requireAssignment(assignmentId);
-        Submission submission = submissionRepository.findByAssignmentIdAndStudentId(assignmentId, memberId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_SUBMISSION_MESSAGE));
-
+        transactions.requireNonTransactionalEntry();
+        transactions.read(() -> memberGuard.requireStudent(memberId));
         String textContent = normalizeText(request);
         boolean hasText = hasText(textContent);
         List<MultipartFile> submittedFiles = files == null ? List.of() : files;
@@ -151,49 +139,46 @@ public class SubmissionService {
         }
         validateFiles(submittedFiles);
 
-        boolean late = determineLateAndRequireEditable(assignment);
-
-        List<SubmissionAttachment> oldLinks = submissionAttachmentRepository
-                .findWithAttachmentBySubmissionId(submission.getId());
-        List<Attachment> oldAttachments = oldLinks.stream().map(SubmissionAttachment::getAttachment).toList();
-        List<String> oldStorageKeys = oldAttachments.stream().map(Attachment::getStorageKey).toList();
+        DeadlineSnapshot deadline = transactions.read(() -> {
+            Assignment assignment = requireAssignment(assignmentId);
+            submissionRepository.findByAssignmentIdAndStudentId(assignmentId, memberId)
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_SUBMISSION_MESSAGE));
+            return snapshotDeadline(assignment);
+        });
 
         List<StoredFile> uploaded = new ArrayList<>();
         try {
-            String directory = "submissions/" + submission.getId();
+            String directory = "submissions/" + UUID.randomUUID();
             for (MultipartFile file : submittedFiles) {
                 uploaded.add(fileStorage.upload(file, directory));
             }
-            List<Attachment> newAttachments = uploaded.stream()
-                    .map(stored -> Attachment.create(stored.originalName(), stored.storedName(),
-                            stored.storageKey(), stored.extension(), stored.sizeKb()))
-                    .toList();
-            attachmentRepository.saveAll(newAttachments);
-            attachmentRepository.flush();
-            submissionAttachmentRepository.saveAll(newAttachments.stream()
-                    .map(attachment -> SubmissionAttachment.create(submission, attachment))
-                    .toList());
-            submissionAttachmentRepository.flush();
-
-            submissionAttachmentRepository.deleteAll(oldLinks);
-            submissionAttachmentRepository.flush();
-            attachmentRepository.deleteAll(oldAttachments);
-            attachmentRepository.flush();
-
-            submission.resubmit(hasText ? textContent : null, late);
-
-            deleteAfterCommit(oldStorageKeys);
-            return SubmissionDetailResponse.from(submission, newAttachments);
         } catch (RuntimeException e) {
             compensate(uploaded);
             throw e;
         }
+        try {
+            ResubmitResult result = transactions.writeWithRollbackConfirmation(() -> replaceSubmission(assignmentId,
+                    memberId, hasText ? textContent : null, deadline.late(), uploaded));
+            storageLifecycle.delete(result.oldStorageKeys());
+            return result.response();
+        } catch (ShortTransactionExecutor.ConfirmedRollbackException e) {
+            compensate(uploaded);
+            throw e.originalException();
+        }
     }
 
-    @Transactional
     public void deleteSubmission(Long assignmentId, Long memberId) {
+        transactions.requireNonTransactionalEntry();
+        transactions.read(() -> memberGuard.requireStudent(memberId));
+        List<String> storageKeys = transactions.write(() -> deleteSubmissionInTransaction(assignmentId, memberId));
+        storageLifecycle.delete(storageKeys);
+    }
+
+    private List<String> deleteSubmissionInTransaction(Long assignmentId, Long memberId) {
         memberGuard.requireStudent(memberId);
-        Submission submission = submissionRepository.findByAssignmentIdAndStudentId(assignmentId, memberId)
+        assignmentRepository.findByIdForUpdate(assignmentId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
+        Submission submission = submissionRepository.findByAssignmentIdAndStudentIdForUpdate(assignmentId, memberId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_SUBMISSION_MESSAGE));
 
         List<SubmissionAttachment> links = submissionAttachmentRepository
@@ -208,9 +193,10 @@ public class SubmissionService {
         submissionRepository.delete(submission);
         submissionRepository.flush();
 
-        deleteAfterCommit(storageKeys);
+        return storageKeys;
     }
 
+    @Transactional(readOnly = true)
     public Page<SubmissionListResponse> getMySubmissions(Long memberId, Pageable pageable) {
         memberGuard.requireStudent(memberId);
         Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
@@ -232,6 +218,7 @@ public class SubmissionService {
         return page;
     }
 
+    @Transactional(readOnly = true)
     public SubmissionAttachmentDownloadUrlResponse getDownloadUrl(Long attachmentId, Long memberId) {
         Member requester = memberGuard.requireMember(memberId);
         SubmissionAttachment link = submissionAttachmentRepository
@@ -245,13 +232,29 @@ public class SubmissionService {
                 downloadUrl.url(), downloadUrl.expiresInSeconds(), attachment.getOriginalName());
     }
 
-    @Transactional
     public void deleteAttachment(Long attachmentId, Long memberId) {
+        transactions.requireNonTransactionalEntry();
+        transactions.read(() -> memberGuard.requireStudent(memberId));
+        AttachmentTarget target = transactions.read(() -> requireAttachmentTarget(attachmentId, memberId));
+        List<String> storageKeys = transactions.write(() ->
+                deleteAttachmentInTransaction(target.assignmentId(), attachmentId, memberId));
+        storageLifecycle.delete(storageKeys);
+    }
+
+    private List<String> deleteAttachmentInTransaction(Long assignmentId, Long attachmentId, Long memberId) {
         Member requester = memberGuard.requireStudent(memberId);
+        assignmentRepository.findByIdForUpdate(assignmentId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
+        Submission lockedSubmission = submissionRepository
+                .findByAssignmentIdAndStudentIdForUpdate(assignmentId, memberId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_SUBMISSION_MESSAGE));
         SubmissionAttachment link = submissionAttachmentRepository
                 .findWithSubmissionAndAttachmentByAttachmentId(attachmentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_ATTACHMENT_MESSAGE));
         Submission submission = link.getSubmission();
+        if (!submission.getId().equals(lockedSubmission.getId())) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_ATTACHMENT_MESSAGE);
+        }
         if (!submission.getStudent().getId().equals(requester.getId())) {
             throw new BusinessException(HttpStatus.FORBIDDEN, FORBIDDEN_OWNER_MESSAGE);
         }
@@ -270,66 +273,80 @@ public class SubmissionService {
         attachmentRepository.delete(attachment);
         attachmentRepository.flush();
 
-        deleteAfterCommit(List.of(attachment.getStorageKey()));
+        return List.of(attachment.getStorageKey());
     }
 
     private void compensate(List<StoredFile> uploaded) {
-        for (StoredFile file : uploaded) {
-            deleteWithRetry(file.storageKey());
-        }
+        storageLifecycle.delete(uploaded.stream().map(StoredFile::storageKey).toList());
     }
 
-    private void deleteAfterCommit(List<String> storageKeys) {
-        if (storageKeys.isEmpty()) {
-            return;
-        }
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    deleteQuietly(storageKeys);
-                }
-            });
-        } else {
-            deleteQuietly(storageKeys);
-        }
+    private SubmissionDetailResponse saveNewSubmission(Long assignmentId, Long memberId, String textContent,
+                                                       boolean late, List<StoredFile> uploaded) {
+        Member student = memberGuard.requireStudent(memberId);
+        Assignment assignment = assignmentRepository.findByIdForUpdate(assignmentId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
+        Submission submission = submissionRepository.save(Submission.create(assignment, student, textContent, late));
+        List<Attachment> attachments = persistAttachments(submission, uploaded);
+        return SubmissionDetailResponse.from(submission, attachments);
     }
 
-    private void deleteQuietly(List<String> storageKeys) {
-        for (String key : storageKeys) {
-            deleteWithRetry(key);
-        }
+    private ResubmitResult replaceSubmission(Long assignmentId, Long memberId, String textContent,
+                                              boolean late, List<StoredFile> uploaded) {
+        memberGuard.requireStudent(memberId);
+        assignmentRepository.findByIdForUpdate(assignmentId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
+        Submission submission = submissionRepository.findByAssignmentIdAndStudentIdForUpdate(assignmentId, memberId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_SUBMISSION_MESSAGE));
+        List<SubmissionAttachment> oldLinks = submissionAttachmentRepository
+                .findWithAttachmentBySubmissionId(submission.getId());
+        List<Attachment> oldAttachments = oldLinks.stream().map(SubmissionAttachment::getAttachment).toList();
+        List<Attachment> newAttachments = persistAttachments(submission, uploaded);
+        submissionAttachmentRepository.deleteAll(oldLinks);
+        submissionAttachmentRepository.flush();
+        attachmentRepository.deleteAll(oldAttachments);
+        attachmentRepository.flush();
+        submission.resubmit(textContent, late);
+        return new ResubmitResult(SubmissionDetailResponse.from(submission, newAttachments),
+                oldAttachments.stream().map(Attachment::getStorageKey).toList());
     }
 
-    private void deleteWithRetry(String storageKey) {
-        for (int attempt = 1; attempt <= MAX_DELETE_ATTEMPTS; attempt++) {
-            try {
-                fileStorage.delete(storageKey);
-                return;
-            } catch (RuntimeException e) {
-                if (attempt == MAX_DELETE_ATTEMPTS) {
-                    log.error("Giving up deleting S3 object after {} attempts: storageKey={}",
-                            MAX_DELETE_ATTEMPTS, storageKey, e);
-                    return;
-                }
-                log.warn("Retrying S3 object delete (attempt {}/{}): storageKey={}",
-                        attempt, MAX_DELETE_ATTEMPTS, storageKey, e);
-                if (!sleepBeforeRetry(storageKey)) {
-                    return;
-                }
-            }
-        }
+    private List<Attachment> persistAttachments(Submission submission, List<StoredFile> uploaded) {
+        List<Attachment> attachments = uploaded.stream()
+                .map(stored -> Attachment.create(stored.originalName(), stored.storedName(),
+                        stored.storageKey(), stored.extension(), stored.sizeKb()))
+                .toList();
+        attachmentRepository.saveAll(attachments);
+        attachmentRepository.flush();
+        submissionAttachmentRepository.saveAll(attachments.stream()
+                .map(attachment -> SubmissionAttachment.create(submission, attachment)).toList());
+        submissionAttachmentRepository.flush();
+        return attachments;
     }
 
-    private boolean sleepBeforeRetry(String storageKey) {
-        try {
-            Thread.sleep(DELETE_RETRY_DELAY_MILLIS);
-            return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("Interrupted while waiting to retry S3 delete: storageKey={}", storageKey, e);
-            return false;
+    private record ResubmitResult(SubmissionDetailResponse response, List<String> oldStorageKeys) {}
+    private record DeadlineSnapshot(java.time.Instant checkedAt, java.time.Instant dueAt,
+                                    boolean allowLateSubmission, boolean late) {}
+    private record AttachmentTarget(Long assignmentId) {}
+
+    private AttachmentTarget requireAttachmentTarget(Long attachmentId, Long memberId) {
+        SubmissionAttachment link = submissionAttachmentRepository
+                .findWithSubmissionAndAttachmentByAttachmentId(attachmentId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_ATTACHMENT_MESSAGE));
+        if (!link.getSubmission().getStudent().getId().equals(memberId)) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, FORBIDDEN_OWNER_MESSAGE);
         }
+        return new AttachmentTarget(link.getSubmission().getAssignment().getId());
+    }
+
+    private DeadlineSnapshot snapshotDeadline(Assignment assignment) {
+        java.time.Instant checkedAt = clock.instant();
+        java.time.Instant dueAt = assignment.getDueAt().toInstant();
+        boolean allowLate = assignment.isAllowLateSubmission();
+        boolean late = checkedAt.isAfter(dueAt);
+        if (late && !allowLate) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, LATE_BLOCKED_MESSAGE);
+        }
+        return new DeadlineSnapshot(checkedAt, dueAt, allowLate, late);
     }
 
     private String normalizeText(SubmissionCreateRequest request) {
