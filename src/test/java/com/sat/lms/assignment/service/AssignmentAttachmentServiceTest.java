@@ -15,7 +15,7 @@ import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,15 +39,18 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class AssignmentAttachmentServiceTest {
     AssignmentRepository assignmentRepository;
     AssignmentAttachmentRepository assignmentAttachmentRepository;
     AttachmentRepository attachmentRepository;
     NoticeAttachmentRepository noticeAttachmentRepository;
-    MemberRepository memberRepository;
+    MemberGuard memberGuard;
     FileStorage fileStorage;
     AttachmentStorageLifecycle lifecycle;
+    AssignmentAttachmentCleanup cleanup;
     AssignmentAttachmentService service;
 
     @BeforeEach
@@ -56,13 +59,13 @@ class AssignmentAttachmentServiceTest {
         assignmentAttachmentRepository = mock(AssignmentAttachmentRepository.class);
         attachmentRepository = mock(AttachmentRepository.class);
         noticeAttachmentRepository = mock(NoticeAttachmentRepository.class);
-        memberRepository = mock(MemberRepository.class);
+        memberGuard = mock(MemberGuard.class);
         fileStorage = mock(FileStorage.class);
         lifecycle = new AttachmentStorageLifecycle(fileStorage);
-        AssignmentAttachmentCleanup cleanup = new AssignmentAttachmentCleanup(
-                assignmentAttachmentRepository, noticeAttachmentRepository, attachmentRepository, lifecycle);
+        cleanup = spy(new AssignmentAttachmentCleanup(
+                assignmentAttachmentRepository, noticeAttachmentRepository, attachmentRepository, lifecycle));
         service = new AssignmentAttachmentService(assignmentRepository, assignmentAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage,
+                attachmentRepository, memberGuard, fileStorage,
                 new AttachmentFileValidator(), lifecycle, cleanup);
     }
 
@@ -264,6 +267,44 @@ class AssignmentAttachmentServiceTest {
         verify(fileStorage, never()).delete(anyString());
     }
 
+    @Test
+    void guardFailureStopsUploadBeforeValidationDomainLookupAndSideEffects() {
+        BusinessException forbidden = new BusinessException(HttpStatus.FORBIDDEN, "승인되지 않은 계정입니다.");
+        when(memberGuard.requireAdmin(7L)).thenThrow(forbidden);
+
+        assertThatThrownBy(() -> service.upload(10L, null, 7L)).isSameAs(forbidden);
+
+        verify(memberGuard).requireAdmin(7L);
+        verifyNoInteractions(assignmentRepository, assignmentAttachmentRepository, attachmentRepository,
+                noticeAttachmentRepository, fileStorage);
+        verify(cleanup, never()).deleteOne(any());
+    }
+
+    @Test
+    void guardFailureStopsDownloadBeforeAttachmentLookupAndUrlCreation() {
+        BusinessException forbidden = new BusinessException(HttpStatus.FORBIDDEN, "승인되지 않은 계정입니다.");
+        when(memberGuard.requireMember(8L)).thenThrow(forbidden);
+
+        assertThatThrownBy(() -> service.getDownloadUrl(1L, 8L)).isSameAs(forbidden);
+
+        verify(memberGuard).requireMember(8L);
+        verifyNoInteractions(assignmentRepository, assignmentAttachmentRepository, attachmentRepository,
+                noticeAttachmentRepository, fileStorage);
+    }
+
+    @Test
+    void guardFailureStopsDeleteBeforeCleanupAndStorage() {
+        BusinessException forbidden = new BusinessException(HttpStatus.FORBIDDEN, "승인되지 않은 계정입니다.");
+        when(memberGuard.requireAdmin(7L)).thenThrow(forbidden);
+
+        assertThatThrownBy(() -> service.delete(1L, 7L)).isSameAs(forbidden);
+
+        verify(memberGuard).requireAdmin(7L);
+        verify(cleanup, never()).deleteOne(any());
+        verifyNoInteractions(assignmentRepository, assignmentAttachmentRepository, attachmentRepository,
+                noticeAttachmentRepository, fileStorage);
+    }
+
     private void prepareAdminAndAssignment() {
         stubMember(7L, MemberRole.ADMIN);
         when(assignmentRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(mock(Assignment.class)));
@@ -286,7 +327,13 @@ class AssignmentAttachmentServiceTest {
     private void stubMember(Long id, MemberRole role) {
         Member member = mock(Member.class);
         when(member.getRole()).thenReturn(role);
-        when(memberRepository.findById(id)).thenReturn(Optional.of(member));
+        when(memberGuard.requireMember(id)).thenReturn(member);
+        if (role == MemberRole.ADMIN) {
+            when(memberGuard.requireAdmin(id)).thenReturn(member);
+        } else {
+            when(memberGuard.requireAdmin(id))
+                    .thenThrow(new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다."));
+        }
     }
 
     private MultipartFile file(String name, int size) {

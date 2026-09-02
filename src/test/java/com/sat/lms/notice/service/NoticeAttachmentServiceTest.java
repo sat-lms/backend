@@ -12,7 +12,7 @@ import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.notice.entity.Notice;
 import com.sat.lms.notice.repository.NoticeRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -40,12 +40,14 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class NoticeAttachmentServiceTest {
     NoticeRepository noticeRepository;
     NoticeAttachmentRepository noticeAttachmentRepository;
     AttachmentRepository attachmentRepository;
-    MemberRepository memberRepository;
+    MemberGuard memberGuard;
     FileStorage fileStorage;
     NoticeAttachmentCleanup cleanup;
     AttachmentStorageLifecycle storageLifecycle;
@@ -56,12 +58,12 @@ class NoticeAttachmentServiceTest {
         noticeRepository = mock(NoticeRepository.class);
         noticeAttachmentRepository = mock(NoticeAttachmentRepository.class);
         attachmentRepository = mock(AttachmentRepository.class);
-        memberRepository = mock(MemberRepository.class);
+        memberGuard = mock(MemberGuard.class);
         fileStorage = mock(FileStorage.class);
         storageLifecycle = new AttachmentStorageLifecycle(fileStorage);
-        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle);
+        cleanup = spy(new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle));
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage, cleanup,
+                attachmentRepository, memberGuard, fileStorage, cleanup,
                 new AttachmentFileValidator(), storageLifecycle);
     }
 
@@ -219,9 +221,9 @@ class NoticeAttachmentServiceTest {
         verify(fileStorage).delete("notices/10/a.pdf");
 
         reset(attachmentRepository, noticeAttachmentRepository);
-        cleanup = new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle);
+        cleanup = spy(new NoticeAttachmentCleanup(noticeAttachmentRepository, attachmentRepository, storageLifecycle));
         service = new NoticeAttachmentService(noticeRepository, noticeAttachmentRepository,
-                attachmentRepository, memberRepository, fileStorage, cleanup,
+                attachmentRepository, memberGuard, fileStorage, cleanup,
                 new AttachmentFileValidator(), storageLifecycle);
         when(attachmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(noticeAttachmentRepository.save(any())).thenThrow(new RuntimeException("link db failed"));
@@ -336,6 +338,41 @@ class NoticeAttachmentServiceTest {
         verify(fileStorage, never()).delete(anyString());
     }
 
+    @Test
+    void guardFailureStopsUploadBeforeValidationDomainLookupAndSideEffects() {
+        BusinessException forbidden = new BusinessException(HttpStatus.FORBIDDEN, "승인되지 않은 계정입니다.");
+        when(memberGuard.requireAdmin(7L)).thenThrow(forbidden);
+
+        assertThatThrownBy(() -> service.upload(10L, null, 7L)).isSameAs(forbidden);
+
+        verify(memberGuard).requireAdmin(7L);
+        verifyNoInteractions(noticeRepository, noticeAttachmentRepository, attachmentRepository, fileStorage);
+        verify(cleanup, never()).deleteOne(any());
+    }
+
+    @Test
+    void guardFailureStopsDownloadBeforeAttachmentLookupAndUrlCreation() {
+        BusinessException forbidden = new BusinessException(HttpStatus.FORBIDDEN, "승인되지 않은 계정입니다.");
+        when(memberGuard.requireMember(8L)).thenThrow(forbidden);
+
+        assertThatThrownBy(() -> service.getDownloadUrl(1L, 8L)).isSameAs(forbidden);
+
+        verify(memberGuard).requireMember(8L);
+        verifyNoInteractions(noticeRepository, noticeAttachmentRepository, attachmentRepository, fileStorage);
+    }
+
+    @Test
+    void guardFailureStopsDeleteBeforeCleanupAndStorage() {
+        BusinessException forbidden = new BusinessException(HttpStatus.FORBIDDEN, "승인되지 않은 계정입니다.");
+        when(memberGuard.requireAdmin(7L)).thenThrow(forbidden);
+
+        assertThatThrownBy(() -> service.delete(1L, 7L)).isSameAs(forbidden);
+
+        verify(memberGuard).requireAdmin(7L);
+        verify(cleanup, never()).deleteOne(any());
+        verifyNoInteractions(noticeRepository, noticeAttachmentRepository, attachmentRepository, fileStorage);
+    }
+
     private void prepareAdminAndNotice() {
         stubMember(7L, MemberRole.ADMIN);
         Notice notice = mock(Notice.class);
@@ -362,7 +399,13 @@ class NoticeAttachmentServiceTest {
 
     private void stubMember(Long memberId, MemberRole role) {
         Member member = member(role);
-        when(memberRepository.findById(memberId)).thenReturn(Optional.of(member));
+        when(memberGuard.requireMember(memberId)).thenReturn(member);
+        if (role == MemberRole.ADMIN) {
+            when(memberGuard.requireAdmin(memberId)).thenReturn(member);
+        } else {
+            when(memberGuard.requireAdmin(memberId))
+                    .thenThrow(new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다."));
+        }
     }
 
     private MultipartFile file(String name, int size) {

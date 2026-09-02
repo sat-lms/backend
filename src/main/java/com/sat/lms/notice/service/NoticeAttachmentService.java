@@ -10,9 +10,7 @@ import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
-import com.sat.lms.member.entity.Member;
-import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.notice.dto.NoticeAttachmentDownloadUrlResponse;
 import com.sat.lms.notice.dto.NoticeAttachmentResponse;
 import com.sat.lms.notice.entity.Notice;
@@ -33,7 +31,7 @@ public class NoticeAttachmentService {
     private final NoticeRepository noticeRepository;
     private final NoticeAttachmentRepository noticeAttachmentRepository;
     private final AttachmentRepository attachmentRepository;
-    private final MemberRepository memberRepository;
+    private final MemberGuard memberGuard;
     private final FileStorage fileStorage;
     private final NoticeAttachmentCleanup cleanup;
     private final AttachmentFileValidator fileValidator;
@@ -42,7 +40,7 @@ public class NoticeAttachmentService {
     public NoticeAttachmentService(NoticeRepository noticeRepository,
                                    NoticeAttachmentRepository noticeAttachmentRepository,
                                    AttachmentRepository attachmentRepository,
-                                   MemberRepository memberRepository,
+                                   MemberGuard memberGuard,
                                    FileStorage fileStorage,
                                    NoticeAttachmentCleanup cleanup,
                                    AttachmentFileValidator fileValidator,
@@ -50,7 +48,7 @@ public class NoticeAttachmentService {
         this.noticeRepository = noticeRepository;
         this.noticeAttachmentRepository = noticeAttachmentRepository;
         this.attachmentRepository = attachmentRepository;
-        this.memberRepository = memberRepository;
+        this.memberGuard = memberGuard;
         this.fileStorage = fileStorage;
         this.cleanup = cleanup;
         this.fileValidator = fileValidator;
@@ -59,7 +57,7 @@ public class NoticeAttachmentService {
 
     @Transactional
     public List<NoticeAttachmentResponse> upload(Long noticeId, List<MultipartFile> files, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         fileValidator.validateList(files);
         Notice notice = noticeRepository.findByIdForUpdate(noticeId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 공지사항입니다."));
@@ -92,7 +90,7 @@ public class NoticeAttachmentService {
     }
 
     public NoticeAttachmentDownloadUrlResponse getDownloadUrl(Long attachmentId, Long memberId) {
-        requireMember(memberId);
+        memberGuard.requireMember(memberId);
         NoticeAttachment link = findNoticeAttachment(attachmentId);
         Attachment attachment = link.getAttachment();
         DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
@@ -102,7 +100,7 @@ public class NoticeAttachmentService {
 
     @Transactional
     public void delete(Long attachmentId, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         cleanup.deleteOne(attachmentId);
     }
 
@@ -122,16 +120,4 @@ public class NoticeAttachmentService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_ATTACHMENT_MESSAGE));
     }
 
-    private Member requireMember(Long memberId) {
-        return memberRepository.findById(memberId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
-    }
-
-    private Member requireAdmin(Long memberId) {
-        Member member = requireMember(memberId);
-        if (member.getRole() != MemberRole.ADMIN) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다.");
-        }
-        return member;
-    }
 }
