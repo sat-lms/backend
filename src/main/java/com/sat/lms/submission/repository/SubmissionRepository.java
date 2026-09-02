@@ -30,17 +30,54 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
 
     @Query(value = """
             select new com.sat.lms.submission.dto.SubmissionListResponse(
-                s.id, a.id, a.title, s.textContent, s.late, s.createdAt, s.updatedAt)
-            from Submission s
-            join s.assignment a
-            where s.student.id = :studentId
-            order by s.createdAt desc, s.id desc
+                s.id, a.id, a.title, a.dueAt, a.allowLateSubmission, s.textContent,
+                coalesce(s.late, false), s.createdAt, s.updatedAt)
+            from Assignment a
+            left join Submission s on s.assignment = a and s.student.id = :studentId
+            where (:includeNotSubmitted = true or s.id is not null)
+            order by a.dueAt desc, a.id desc
             """,
             countQuery = """
-            select count(s.id) from Submission s where s.student.id = :studentId
+            select count(a.id) from Assignment a
+            left join Submission s on s.assignment = a and s.student.id = :studentId
+            where (:includeNotSubmitted = true or s.id is not null)
             """)
-    Page<SubmissionListResponse> findSubmissionPageByStudentId(@Param("studentId") Long studentId,
-                                                               Pageable pageable);
+    Page<SubmissionListResponse> findMySubmissionPageDueAtDesc(@Param("studentId") Long studentId,
+            @Param("includeNotSubmitted") boolean includeNotSubmitted, Pageable pageable);
+
+    @Query(value = """
+            select new com.sat.lms.submission.dto.SubmissionListResponse(
+                s.id, a.id, a.title, a.dueAt, a.allowLateSubmission, s.textContent,
+                coalesce(s.late, false), s.createdAt, s.updatedAt)
+            from Assignment a
+            left join Submission s on s.assignment = a and s.student.id = :studentId
+            where (:includeNotSubmitted = true or s.id is not null)
+            order by a.dueAt asc, a.id asc
+            """,
+            countQuery = """
+            select count(a.id) from Assignment a
+            left join Submission s on s.assignment = a and s.student.id = :studentId
+            where (:includeNotSubmitted = true or s.id is not null)
+            """)
+    Page<SubmissionListResponse> findMySubmissionPageDueAtAsc(@Param("studentId") Long studentId,
+            @Param("includeNotSubmitted") boolean includeNotSubmitted, Pageable pageable);
+
+    @Query(value = """
+            select new com.sat.lms.submission.dto.SubmissionListResponse(
+                s.id, a.id, a.title, a.dueAt, a.allowLateSubmission, s.textContent,
+                coalesce(s.late, false), s.createdAt, s.updatedAt)
+            from Assignment a
+            left join Submission s on s.assignment = a and s.student.id = :studentId
+            where (:includeNotSubmitted = true or s.id is not null)
+            order by case when s.updatedAt is null then 1 else 0 end asc, s.updatedAt desc, a.id desc
+            """,
+            countQuery = """
+            select count(a.id) from Assignment a
+            left join Submission s on s.assignment = a and s.student.id = :studentId
+            where (:includeNotSubmitted = true or s.id is not null)
+            """)
+    Page<SubmissionListResponse> findMySubmissionPageSubmittedAtDesc(@Param("studentId") Long studentId,
+            @Param("includeNotSubmitted") boolean includeNotSubmitted, Pageable pageable);
 
     @EntityGraph(attributePaths = {"student", "assignment"})
     @Query("select s from Submission s where s.id = :submissionId")

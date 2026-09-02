@@ -21,6 +21,16 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
             countQuery = "select count(a.id) from Assignment a")
     Page<AssignmentListResponse> findAssignmentPage(Pageable pageable);
 
+    @Query(value = """
+            select new com.sat.lms.assignment.dto.AssignmentListResponse(
+                a.id, a.title, a.dueAt, a.allowLateSubmission, a.createdAt, a.updatedAt,
+                s.id, coalesce(s.late, false))
+            from Assignment a
+            left join Submission s on s.assignment = a and s.student.id = :studentId
+            """,
+            countQuery = "select count(a.id) from Assignment a")
+    Page<AssignmentListResponse> findStudentAssignmentPage(@Param("studentId") Long studentId, Pageable pageable);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from Assignment a where a.id = :assignmentId")
     Optional<Assignment> findByIdForUpdate(@Param("assignmentId") Long assignmentId);

@@ -21,6 +21,7 @@ import com.sat.lms.submission.dto.SubmissionCreateRequest;
 import com.sat.lms.submission.dto.SubmissionDetailResponse;
 import com.sat.lms.submission.dto.SubmissionFileResponse;
 import com.sat.lms.submission.dto.SubmissionListResponse;
+import com.sat.lms.submission.dto.MySubmissionSort;
 import com.sat.lms.submission.entity.Submission;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.springframework.data.domain.Page;
@@ -63,12 +64,14 @@ public class SubmissionService {
     private final Clock clock;
     private final AttachmentStorageLifecycle storageLifecycle;
     private final ShortTransactionExecutor transactions;
+    private final SubmissionStatusCalculator submissionStatusCalculator;
 
     public SubmissionService(SubmissionRepository submissionRepository, AssignmentRepository assignmentRepository,
                              MemberGuard memberGuard, AttachmentRepository attachmentRepository,
                              SubmissionAttachmentRepository submissionAttachmentRepository, FileStorage fileStorage,
                              Clock clock, AttachmentStorageLifecycle storageLifecycle,
-                             ShortTransactionExecutor transactions) {
+                             ShortTransactionExecutor transactions,
+                             SubmissionStatusCalculator submissionStatusCalculator) {
         this.submissionRepository = submissionRepository;
         this.assignmentRepository = assignmentRepository;
         this.memberGuard = memberGuard;
@@ -78,6 +81,7 @@ public class SubmissionService {
         this.clock = clock;
         this.storageLifecycle = storageLifecycle;
         this.transactions = transactions;
+        this.submissionStatusCalculator = submissionStatusCalculator;
     }
 
     @Transactional(readOnly = true)
@@ -197,13 +201,25 @@ public class SubmissionService {
     }
 
     @Transactional(readOnly = true)
-    public Page<SubmissionListResponse> getMySubmissions(Long memberId, Pageable pageable) {
+    public Page<SubmissionListResponse> getMySubmissions(Long memberId, boolean includeNotSubmitted,
+                                                         MySubmissionSort sort, Pageable pageable) {
         memberGuard.requireStudent(memberId);
+        var now = clock.instant();
         Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
-        Page<SubmissionListResponse> page = submissionRepository.findSubmissionPageByStudentId(memberId, unsorted);
+        Page<SubmissionListResponse> page = switch (sort) {
+            case DUE_AT_DESC -> submissionRepository.findMySubmissionPageDueAtDesc(
+                    memberId, includeNotSubmitted, unsorted);
+            case DUE_AT_ASC -> submissionRepository.findMySubmissionPageDueAtAsc(
+                    memberId, includeNotSubmitted, unsorted);
+            case SUBMITTED_AT_DESC -> submissionRepository.findMySubmissionPageSubmittedAtDesc(
+                    memberId, includeNotSubmitted, unsorted);
+        };
         if (page.isEmpty()) {
             return page;
         }
+        page.forEach(item -> item.assignSubmissionStatus(submissionStatusCalculator.calculate(
+                item.getSubmissionId(), item.getIsLate(), item.getDueAt(),
+                item.isAllowLateSubmission(), now)));
         List<Long> submissionIds = page.getContent().stream()
                 .map(SubmissionListResponse::getSubmissionId)
                 .toList();
@@ -217,6 +233,7 @@ public class SubmissionService {
                 item.assignAttachments(attachmentsBySubmissionId.getOrDefault(item.getSubmissionId(), List.of())));
         return page;
     }
+
 
     @Transactional(readOnly = true)
     public SubmissionAttachmentDownloadUrlResponse getDownloadUrl(Long attachmentId, Long memberId) {
