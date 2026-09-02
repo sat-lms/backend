@@ -1,7 +1,9 @@
 package com.sat.lms.member.service;
 
 import com.sat.lms.global.security.JwtTokenProvider;
+import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
+import com.sat.lms.global.storage.StoredFile;
 import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,9 +25,16 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * 로그인 시점 이후, 매 요청마다 회원 상태(MemberStatus)가 재검증되는지 확인한다.
@@ -160,6 +169,148 @@ class MemberGuardPostgreSqlIntegrationTest {
                 .andExpect(jsonPath("$.message").value("탈퇴하거나 정지된 계정입니다."));
     }
 
+    @Test
+    void rejectedAdminCannotUseNoticeAttachmentApisWithExistingToken() throws Exception {
+        Long adminId = insertMember("noticeA", "관리자", "ADMIN", "APPROVED");
+        Long noticeId = insertNotice(adminId, "공지");
+        Long attachmentId = insertNoticeAttachment(noticeId, "notices/blocked.pdf");
+        String token = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+
+        jdbcTemplate.update("UPDATE member SET status = 'REJECTED' WHERE id = ?", adminId);
+
+        mockMvc.perform(multipart("/api/v1/notices/{noticeId}/attachments", noticeId)
+                        .file(attachmentFile("new.pdf"))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/notice-attachments/{attachmentId}/download-url", attachmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/notice-attachments/{attachmentId}", attachmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+
+        assertThat(count("notice_attachment", attachmentId)).isEqualTo(1);
+        assertThat(count("attachment", attachmentId)).isEqualTo(1);
+        verifyNoInteractions(fileStorage);
+    }
+
+    @Test
+    void withdrawnStudentCannotUseNoticeAttachmentApisWithExistingToken() throws Exception {
+        Long adminId = insertMember("noticeO", "관리자", "ADMIN", "APPROVED");
+        Long studentId = insertMember("noticeS", "학생", "STUDENT", "APPROVED");
+        Long attachmentId = insertNoticeAttachment(insertNotice(adminId, "공지"), "notices/student.pdf");
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+
+        jdbcTemplate.update("UPDATE member SET status = 'WITHDRAWN' WHERE id = ?", studentId);
+
+        mockMvc.perform(get("/api/v1/notice-attachments/{attachmentId}/download-url", attachmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(multipart("/api/v1/notices/1/attachments").file(attachmentFile("new.pdf"))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/notice-attachments/{attachmentId}", attachmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+
+        assertThat(count("notice_attachment", attachmentId)).isEqualTo(1);
+        verifyNoInteractions(fileStorage);
+    }
+
+    @Test
+    void rejectedAdminCannotUseAssignmentAttachmentApisWithExistingToken() throws Exception {
+        Long adminId = insertMember("assignA", "관리자", "ADMIN", "APPROVED");
+        Long assignmentId = insertAssignment(adminId);
+        Long attachmentId = insertAssignmentAttachment(assignmentId, "assignments/blocked.pdf");
+        String token = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+
+        jdbcTemplate.update("UPDATE member SET status = 'REJECTED' WHERE id = ?", adminId);
+
+        mockMvc.perform(multipart("/api/v1/assignments/{assignmentId}/attachments", assignmentId)
+                        .file(attachmentFile("new.pdf"))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/assignment-attachments/{attachmentId}/download-url", attachmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/assignment-attachments/{attachmentId}", attachmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+
+        assertThat(count("assignment_attachment", attachmentId)).isEqualTo(1);
+        assertThat(count("attachment", attachmentId)).isEqualTo(1);
+        verifyNoInteractions(fileStorage);
+    }
+
+    @Test
+    void withdrawnStudentCannotUseAssignmentAttachmentApisWithExistingToken() throws Exception {
+        Long adminId = insertMember("assignO", "관리자", "ADMIN", "APPROVED");
+        Long studentId = insertMember("assignS", "학생", "STUDENT", "APPROVED");
+        Long attachmentId = insertAssignmentAttachment(insertAssignment(adminId), "assignments/student.pdf");
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+
+        jdbcTemplate.update("UPDATE member SET status = 'WITHDRAWN' WHERE id = ?", studentId);
+
+        mockMvc.perform(get("/api/v1/assignment-attachments/{attachmentId}/download-url", attachmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(multipart("/api/v1/assignments/1/attachments").file(attachmentFile("new.pdf"))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/assignment-attachments/{attachmentId}", attachmentId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+
+        assertThat(count("assignment_attachment", attachmentId)).isEqualTo(1);
+        verifyNoInteractions(fileStorage);
+    }
+
+    @Test
+    void approvedMembersUseAttachmentApisAccordingToTheirRoles() throws Exception {
+        Long adminId = insertMember("attachA", "관리자", "ADMIN", "APPROVED");
+        Long studentId = insertMember("attachS", "학생", "STUDENT", "APPROVED");
+        Long noticeId = insertNotice(adminId, "공지");
+        Long assignmentId = insertAssignment(adminId);
+        Long noticeAttachmentId = insertNoticeAttachment(noticeId, "notices/existing.pdf");
+        Long assignmentAttachmentId = insertAssignmentAttachment(assignmentId, "assignments/existing.pdf");
+        String adminToken = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+        String studentToken = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        when(fileStorage.createDownloadUrl(anyString())).thenReturn(new DownloadUrl("https://example.test", 300));
+        when(fileStorage.upload(any(), eq("notices/" + noticeId)))
+                .thenReturn(new StoredFile("new.pdf", "notice-new.pdf", "notices/new.pdf", "pdf", 1L));
+        when(fileStorage.upload(any(), eq("assignments/" + assignmentId)))
+                .thenReturn(new StoredFile("new.pdf", "assignment-new.pdf", "assignments/new.pdf", "pdf", 1L));
+
+        for (String token : new String[]{adminToken, studentToken}) {
+            mockMvc.perform(get("/api/v1/notice-attachments/{id}/download-url", noticeAttachmentId)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk());
+            mockMvc.perform(get("/api/v1/assignment-attachments/{id}/download-url", assignmentAttachmentId)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(multipart("/api/v1/notices/{id}/attachments", noticeId)
+                        .file(attachmentFile("new.pdf")).header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/assignment-attachments/{id}", assignmentAttachmentId)
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(multipart("/api/v1/notices/{id}/attachments", noticeId)
+                        .file(attachmentFile("new.pdf")).header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isCreated());
+        mockMvc.perform(multipart("/api/v1/assignments/{id}/attachments", assignmentId)
+                        .file(attachmentFile("new.pdf")).header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isCreated());
+        mockMvc.perform(delete("/api/v1/notice-attachments/{id}", noticeAttachmentId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(delete("/api/v1/assignment-attachments/{id}", assignmentAttachmentId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+    }
+
     private void assertNoSubmissionWasCreated(Long assignmentId, Long studentId) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM submission WHERE assignment_id = ? AND student_id = ?",
@@ -170,6 +321,38 @@ class MemberGuardPostgreSqlIntegrationTest {
     private MockMultipartFile jsonPart(String textContent) {
         String body = "{\"textContent\":\"" + textContent + "\"}";
         return new MockMultipartFile("request", "request", "application/json", body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private MockMultipartFile attachmentFile(String name) {
+        return new MockMultipartFile("files", name, "application/pdf",
+                "attachment".getBytes(StandardCharsets.UTF_8));
+    }
+
+    private Long insertNoticeAttachment(Long noticeId, String storageKey) {
+        Long attachmentId = insertAttachment(storageKey);
+        jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?)",
+                noticeId, attachmentId);
+        return attachmentId;
+    }
+
+    private Long insertAssignmentAttachment(Long assignmentId, String storageKey) {
+        Long attachmentId = insertAttachment(storageKey);
+        jdbcTemplate.update("INSERT INTO assignment_attachment (assignment_id, attachment_id) VALUES (?, ?)",
+                assignmentId, attachmentId);
+        return attachmentId;
+    }
+
+    private Long insertAttachment(String storageKey) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO attachment (original_name, stored_name, storage_key, extension, size_kb, created_at)
+                VALUES ('file.pdf', 'stored.pdf', ?, 'pdf', 1, now()) RETURNING id
+                """, Long.class, storageKey);
+    }
+
+    private Integer count(String table, Long attachmentId) {
+        String idColumn = table.equals("attachment") ? "id" : "attachment_id";
+        return jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM " + table + " WHERE " + idColumn + " = ?", Integer.class, attachmentId);
     }
 
     private Long insertMember(String studentNumber, String name, String role, String status) {

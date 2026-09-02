@@ -14,9 +14,7 @@ import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.storage.DownloadUrl;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.global.storage.StoredFile;
-import com.sat.lms.member.entity.Member;
-import com.sat.lms.member.entity.MemberRole;
-import com.sat.lms.member.repository.MemberRepository;
+import com.sat.lms.member.service.MemberGuard;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +31,7 @@ public class AssignmentAttachmentService {
     private final AssignmentRepository assignmentRepository;
     private final AssignmentAttachmentRepository assignmentAttachmentRepository;
     private final AttachmentRepository attachmentRepository;
-    private final MemberRepository memberRepository;
+    private final MemberGuard memberGuard;
     private final FileStorage fileStorage;
     private final AttachmentFileValidator fileValidator;
     private final AttachmentStorageLifecycle storageLifecycle;
@@ -42,7 +40,7 @@ public class AssignmentAttachmentService {
     public AssignmentAttachmentService(AssignmentRepository assignmentRepository,
                                        AssignmentAttachmentRepository assignmentAttachmentRepository,
                                        AttachmentRepository attachmentRepository,
-                                       MemberRepository memberRepository,
+                                       MemberGuard memberGuard,
                                        FileStorage fileStorage,
                                        AttachmentFileValidator fileValidator,
                                        AttachmentStorageLifecycle storageLifecycle,
@@ -50,7 +48,7 @@ public class AssignmentAttachmentService {
         this.assignmentRepository = assignmentRepository;
         this.assignmentAttachmentRepository = assignmentAttachmentRepository;
         this.attachmentRepository = attachmentRepository;
-        this.memberRepository = memberRepository;
+        this.memberGuard = memberGuard;
         this.fileStorage = fileStorage;
         this.fileValidator = fileValidator;
         this.storageLifecycle = storageLifecycle;
@@ -59,7 +57,7 @@ public class AssignmentAttachmentService {
 
     @Transactional
     public List<AssignmentAttachmentResponse> upload(Long assignmentId, List<MultipartFile> files, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         fileValidator.validateList(files);
         Assignment assignment = assignmentRepository.findByIdForUpdate(assignmentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 과제입니다."));
@@ -92,7 +90,7 @@ public class AssignmentAttachmentService {
     }
 
     public AssignmentAttachmentDownloadUrlResponse getDownloadUrl(Long attachmentId, Long memberId) {
-        requireMember(memberId);
+        memberGuard.requireMember(memberId);
         AssignmentAttachment link = findAssignmentAttachment(attachmentId);
         Attachment attachment = link.getAttachment();
         DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
@@ -102,7 +100,7 @@ public class AssignmentAttachmentService {
 
     @Transactional
     public void delete(Long attachmentId, Long memberId) {
-        requireAdmin(memberId);
+        memberGuard.requireAdmin(memberId);
         cleanup.deleteOne(attachmentId);
     }
 
@@ -122,15 +120,4 @@ public class AssignmentAttachmentService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, NOT_FOUND_MESSAGE));
     }
 
-    private Member requireMember(Long memberId) {
-        return memberRepository.findById(memberId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
-    }
-
-    private void requireAdmin(Long memberId) {
-        Member member = requireMember(memberId);
-        if (member.getRole() != MemberRole.ADMIN) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다.");
-        }
-    }
 }
