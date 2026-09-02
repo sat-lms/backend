@@ -12,6 +12,7 @@ import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
 import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.submission.repository.SubmissionRepository;
+import com.sat.lms.submission.service.SubmissionStatusCalculator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -56,7 +57,7 @@ class AssignmentServiceTest {
         ShortTransactionExecutor transactions = immediateTransactions();
         service = new AssignmentService(assignmentRepository, submissionRepository, memberGuard,
                 Clock.fixed(NOW, ZoneOffset.UTC), assignmentAttachmentRepository, attachmentCleanup,
-                lifecycle, transactions);
+                lifecycle, transactions, new SubmissionStatusCalculator());
     }
 
     private ShortTransactionExecutor immediateTransactions() {
@@ -129,12 +130,12 @@ class AssignmentServiceTest {
     void authenticatedMemberCanListUsingAllowedSort() {
         Member student = member(MemberRole.STUDENT);
         stubApprovedMember(8L, student);
-        when(assignmentRepository.findAssignmentPage(any())).thenReturn(Page.empty());
+        when(assignmentRepository.findStudentAssignmentPage(any(), any())).thenReturn(Page.empty());
 
         service.getAssignments(8L, PageRequest.of(1, 5, Sort.by(Sort.Direction.ASC, "dueAt")));
 
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-        verify(assignmentRepository).findAssignmentPage(captor.capture());
+        verify(assignmentRepository).findStudentAssignmentPage(org.mockito.ArgumentMatchers.eq(8L), captor.capture());
         assertThat(captor.getValue().getPageNumber()).isEqualTo(1);
         assertThat(captor.getValue().getPageSize()).isEqualTo(5);
         assertThat(captor.getValue().getSort().getOrderFor("dueAt").isAscending()).isTrue();
@@ -144,7 +145,7 @@ class AssignmentServiceTest {
     void defaultAndAllAllowedSortFieldsAreAccepted() {
         Member student = member(MemberRole.STUDENT);
         stubApprovedMember(8L, student);
-        when(assignmentRepository.findAssignmentPage(any())).thenReturn(Page.empty());
+        when(assignmentRepository.findStudentAssignmentPage(any(), any())).thenReturn(Page.empty());
 
         for (String field : new String[]{"createdAt", "updatedAt", "dueAt", "title"}) {
             for (Sort.Direction direction : Sort.Direction.values()) {
@@ -154,7 +155,8 @@ class AssignmentServiceTest {
         service.getAssignments(8L, PageRequest.of(0, 20));
 
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
-        verify(assignmentRepository, org.mockito.Mockito.times(9)).findAssignmentPage(captor.capture());
+        verify(assignmentRepository, org.mockito.Mockito.times(9))
+                .findStudentAssignmentPage(org.mockito.ArgumentMatchers.eq(8L), captor.capture());
         Pageable defaultPageable = captor.getAllValues().get(8);
         assertThat(defaultPageable.getSort().getOrderFor("dueAt").isAscending()).isTrue();
         assertThat(defaultPageable.getSort().getOrderFor("id").isAscending()).isTrue();

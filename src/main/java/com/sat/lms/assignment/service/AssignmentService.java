@@ -13,6 +13,8 @@ import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.attachment.service.AttachmentStorageLifecycle;
 import com.sat.lms.global.transaction.ShortTransactionExecutor;
 import com.sat.lms.submission.repository.SubmissionRepository;
+import com.sat.lms.submission.service.SubmissionStatusCalculator;
+import com.sat.lms.member.entity.MemberRole;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -41,6 +43,7 @@ public class AssignmentService {
     private final AssignmentAttachmentCleanup attachmentCleanup;
     private final AttachmentStorageLifecycle storageLifecycle;
     private final ShortTransactionExecutor transactions;
+    private final SubmissionStatusCalculator submissionStatusCalculator;
 
     public AssignmentService(AssignmentRepository assignmentRepository,
                              SubmissionRepository submissionRepository,
@@ -49,7 +52,8 @@ public class AssignmentService {
                              AssignmentAttachmentRepository assignmentAttachmentRepository,
                              AssignmentAttachmentCleanup attachmentCleanup,
                              AttachmentStorageLifecycle storageLifecycle,
-                             ShortTransactionExecutor transactions) {
+                             ShortTransactionExecutor transactions,
+                             SubmissionStatusCalculator submissionStatusCalculator) {
         this.assignmentRepository = assignmentRepository;
         this.submissionRepository = submissionRepository;
         this.memberGuard = memberGuard;
@@ -58,6 +62,7 @@ public class AssignmentService {
         this.attachmentCleanup = attachmentCleanup;
         this.storageLifecycle = storageLifecycle;
         this.transactions = transactions;
+        this.submissionStatusCalculator = submissionStatusCalculator;
     }
 
     @Transactional
@@ -71,9 +76,18 @@ public class AssignmentService {
 
     @Transactional(readOnly = true)
     public Page<AssignmentListResponse> getAssignments(Long memberId, Pageable pageable) {
-        memberGuard.requireMember(memberId);
-        return assignmentRepository.findAssignmentPage(PageRequest.of(
-                pageable.getPageNumber(), pageable.getPageSize(), validateSort(pageable.getSort())));
+        Member requester = memberGuard.requireMember(memberId);
+        Pageable validated = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                validateSort(pageable.getSort()));
+        if (requester.getRole() != MemberRole.STUDENT) {
+            return assignmentRepository.findAssignmentPage(validated);
+        }
+        var now = clock.instant();
+        Page<AssignmentListResponse> page = assignmentRepository.findStudentAssignmentPage(memberId, validated);
+        page.forEach(item -> item.assignSubmissionStatus(submissionStatusCalculator.calculate(
+                item.getSubmissionIdForStatus(), item.isSubmissionLateForStatus(), item.getDueAt(),
+                item.getAllowLateSubmission(), now)));
+        return page;
     }
 
     @Transactional(readOnly = true)

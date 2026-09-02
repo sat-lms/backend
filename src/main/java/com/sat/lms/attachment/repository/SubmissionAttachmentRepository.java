@@ -15,7 +15,7 @@ public interface SubmissionAttachmentRepository extends JpaRepository<Submission
     List<SubmissionAttachment> findWithAttachmentBySubmissionId(@Param("submissionId") Long submissionId);
 
     @EntityGraph(attributePaths = "attachment")
-    @Query("select sa from SubmissionAttachment sa where sa.submission.id in :submissionIds")
+    @Query("select sa from SubmissionAttachment sa where sa.submission.id in :submissionIds order by sa.attachment.id asc")
     List<SubmissionAttachment> findWithAttachmentBySubmissionIdIn(
             @Param("submissionIds") List<Long> submissionIds);
 

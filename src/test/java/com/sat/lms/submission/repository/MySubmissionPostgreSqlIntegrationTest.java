@@ -33,6 +33,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -139,6 +141,7 @@ class MySubmissionPostgreSqlIntegrationTest {
         submitText(studentBId, tokenB, insertAssignment("과제B전용"), "B의 제출");
 
         mockMvc.perform(get("/api/v1/members/me/submissions")
+                        .param("includeNotSubmitted", "false")
                         .header("Authorization", "Bearer " + tokenA))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(1))
@@ -246,12 +249,125 @@ class MySubmissionPostgreSqlIntegrationTest {
         statistics.clear();
 
         mockMvc.perform(get("/api/v1/members/me/submissions")
-                        .param("size", "20")
+                        .param("size", "2")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content.length()").value(5));
+                .andExpect(jsonPath("$.data.content.length()").value(2))
+                .andExpect(jsonPath("$.data.totalElements").value(5))
+                .andExpect(jsonPath("$.data.totalPages").value(3));
 
-        assertThat(statistics.getQueryExecutionCount()).isLessThanOrEqualTo(4);
+        assertThat(statistics.getQueryExecutionCount()).isEqualTo(3);
+    }
+
+    @Test
+    void allNotSubmittedPageSkipsAttachmentQueryAndExecutesOnlyContentAndCountQueries() throws Exception {
+        Long studentId = insertMember("student15", "student", "STUDENT");
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        for (int i = 0; i < 5; i++) insertAssignment("missing-" + i);
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        mockMvc.perform(get("/api/v1/members/me/submissions")
+                        .param("page", "0").param("size", "2")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(2))
+                .andExpect(jsonPath("$.data.totalElements").value(5))
+                .andExpect(jsonPath("$.data.totalPages").value(3))
+                .andExpect(jsonPath("$.data.content[0].submissionId").doesNotExist())
+                .andExpect(jsonPath("$.data.content[0].attachments.length()").value(0))
+                .andExpect(jsonPath("$.data.content[0].fileNames.length()").value(0));
+
+        assertThat(statistics.getQueryExecutionCount()).isEqualTo(2);
+    }
+
+    @Test
+    void assignmentBasedListIncludesMissingRowsWithoutLeakingAnotherStudentsSubmissionAndMatchesApi23Status()
+            throws Exception {
+        Long studentId = insertMember("student11", "student", "STUDENT");
+        Long otherId = insertMember("student12", "other", "STUDENT");
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        Long futureId = insertAssignment("future");
+        Long closedId = insertAssignment("closed");
+        Long ownId = insertAssignment("own");
+        Long otherOnlyId = insertAssignment("other-only");
+        jdbcTemplate.update("UPDATE assignment SET due_at=now()-interval '1 day', allow_late_submission=false WHERE id=?",
+                closedId);
+        insertSubmission(ownId, studentId, false, "own text", OffsetDateTime.now().minusHours(1));
+        insertSubmission(otherOnlyId, otherId, false, "secret text", OffsetDateTime.now().minusHours(1));
+
+        MvcResult result = mockMvc.perform(get("/api/v1/members/me/submissions")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(4))
+                .andReturn();
+        Map<Long, JsonNode> rows = rowsByAssignment(result);
+        assertThat(rows.get(futureId).get("submissionStatus").asText()).isEqualTo("IN_PROGRESS");
+        assertThat(rows.get(closedId).get("submissionStatus").asText()).isEqualTo("NOT_SUBMITTED");
+        assertThat(rows.get(ownId).get("submissionStatus").asText()).isEqualTo("SUBMITTED");
+        assertThat(rows.get(otherOnlyId).get("submissionId").isNull()).isTrue();
+        assertThat(rows.get(otherOnlyId).get("textContent").isNull()).isTrue();
+        assertThat(rows.get(otherOnlyId).get("fileNames").isEmpty()).isTrue();
+        assertThat(rows.get(otherOnlyId).get("attachments").isEmpty()).isTrue();
+
+        mockMvc.perform(get("/api/v1/members/me/submissions")
+                        .param("includeNotSubmitted", "false")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalElements").value(1));
+
+        MvcResult assignments = mockMvc.perform(get("/api/v1/assignments")
+                        .param("size", "20").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andReturn();
+        Map<Long, JsonNode> assignmentRows = rowsByAssignment(assignments);
+        rows.forEach((id, row) -> assertThat(assignmentRows.get(id).get("submissionStatus").asText())
+                .isEqualTo(row.get("submissionStatus").asText()));
+    }
+
+    @Test
+    void fixedDatabaseSortsHaveDeterministicTieBreakersAndSubmittedNullsLast() throws Exception {
+        Long studentId = insertMember("student13", "student", "STUDENT");
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        Long a = insertAssignment("a");
+        Long b = insertAssignment("b");
+        Long c = insertAssignment("c");
+        OffsetDateTime tiedDueAt = OffsetDateTime.parse("2030-01-01T00:00:00Z");
+        jdbcTemplate.update("UPDATE assignment SET due_at=? WHERE id in (?,?,?)", tiedDueAt, a, b, c);
+        OffsetDateTime tiedSubmittedAt = OffsetDateTime.parse("2026-01-01T00:00:00Z");
+        insertSubmission(a, studentId, false, "a", tiedSubmittedAt);
+        insertSubmission(b, studentId, true, "b", tiedSubmittedAt);
+
+        assertThat(fetchAssignmentIds(token, "dueAtDesc")).containsExactly(c, b, a);
+        assertThat(fetchAssignmentIds(token, "dueAtAsc")).containsExactly(a, b, c);
+        assertThat(fetchAssignmentIds(token, "submittedAtDesc")).containsExactly(b, a, c);
+    }
+
+    @Test
+    void submittedAtTracksResubmissionUpdatedAtAndFileNamesFollowAttachmentOrder() throws Exception {
+        Long studentId = insertMember("student14", "student", "STUDENT");
+        String token = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+        Long assignmentId = insertAssignment("resubmit-time");
+        insertSubmission(assignmentId, studentId, false, "first",
+                OffsetDateTime.parse("2025-01-01T00:00:00Z"));
+
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/v1/assignments/{assignmentId}/submission", assignmentId)
+                        .file(jsonPart("second")).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        Long submissionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM submission WHERE assignment_id=? AND student_id=?", Long.class,
+                assignmentId, studentId);
+        insertAttachment(submissionId, "first.pdf");
+        insertAttachment(submissionId, "second.pdf");
+
+        MvcResult result = mockMvc.perform(get("/api/v1/members/me/submissions")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andReturn();
+        JsonNode row = rowsByAssignment(result).get(assignmentId);
+        assertThat(row.get("submittedAt").asText()).isEqualTo(row.get("updatedAt").asText());
+        assertThat(OffsetDateTime.parse(row.get("submittedAt").asText()))
+                .isAfter(OffsetDateTime.parse(row.get("createdAt").asText()));
+        assertThat(objectMapper.convertValue(row.get("fileNames"), List.class))
+                .containsExactly("first.pdf", "second.pdf");
     }
 
     private void submitText(Long studentId, String token, Long assignmentId, String textContent) throws Exception {
@@ -259,6 +375,41 @@ class MySubmissionPostgreSqlIntegrationTest {
                         .file(jsonPart(textContent))
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isCreated());
+    }
+
+    private void insertSubmission(Long assignmentId, Long studentId, boolean late, String text,
+                                  OffsetDateTime submittedAt) {
+        jdbcTemplate.update("""
+                INSERT INTO submission(assignment_id,student_id,text_content,is_late,created_at,updated_at)
+                VALUES (?,?,?,?,?,?)
+                """, assignmentId, studentId, text, late, submittedAt, submittedAt);
+    }
+
+    private void insertAttachment(Long submissionId, String originalName) {
+        Long attachmentId = jdbcTemplate.queryForObject("""
+                INSERT INTO attachment(original_name,stored_name,storage_key,extension,size_kb,created_at)
+                VALUES (?, ?, ?, 'pdf', 1, now()) RETURNING id
+                """, Long.class, originalName, "stored-" + originalName, "test/" + submissionId + "/" + originalName);
+        jdbcTemplate.update("INSERT INTO submission_attachment(submission_id,attachment_id) VALUES (?,?)",
+                submissionId, attachmentId);
+    }
+
+    private Map<Long, JsonNode> rowsByAssignment(MvcResult result) throws Exception {
+        JsonNode content = objectMapper.readTree(result.getResponse().getContentAsString()).get("data").get("content");
+        List<JsonNode> rows = new ArrayList<>();
+        content.forEach(rows::add);
+        return rows.stream().collect(Collectors.toMap(row -> row.get("assignmentId").asLong(), row -> row));
+    }
+
+    private List<Long> fetchAssignmentIds(String token, String sort) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/members/me/submissions")
+                        .param("sort", sort).param("size", "20")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andReturn();
+        List<Long> ids = new ArrayList<>();
+        objectMapper.readTree(result.getResponse().getContentAsString()).get("data").get("content")
+                .forEach(row -> ids.add(row.get("assignmentId").asLong()));
+        return ids;
     }
 
     private MockMultipartFile jsonPart(String textContent) {

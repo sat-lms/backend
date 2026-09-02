@@ -18,6 +18,7 @@ import com.sat.lms.member.service.MemberGuard;
 import com.sat.lms.submission.dto.SubmissionCreateRequest;
 import com.sat.lms.submission.dto.SubmissionFileResponse;
 import com.sat.lms.submission.dto.SubmissionListResponse;
+import com.sat.lms.submission.dto.MySubmissionSort;
 import com.sat.lms.submission.entity.Submission;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.doThrow;
@@ -92,7 +94,7 @@ class SubmissionServiceTest {
                         invocation.getArgument(0), invocation.getArgument(1)));
         service = new SubmissionService(submissionRepository, assignmentRepository, memberGuard,
                 attachmentRepository, submissionAttachmentRepository, fileStorage, Clock.systemUTC(),
-                storageLifecycle, transactions);
+                storageLifecycle, transactions, new SubmissionStatusCalculator());
 
         when(submissionRepository.save(any())).thenAnswer(invocation -> {
             Submission submission = invocation.getArgument(0);
@@ -434,18 +436,69 @@ class SubmissionServiceTest {
         Pageable requested = PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "title"));
         Pageable pageable = PageRequest.of(0, 20);
         Page<SubmissionListResponse> page = new PageImpl<>(List.of(withFile, withoutFile), pageable, 2);
-        when(submissionRepository.findSubmissionPageByStudentId(3L, pageable)).thenReturn(page);
+        when(submissionRepository.findMySubmissionPageDueAtDesc(3L, false, pageable)).thenReturn(page);
         Attachment attachmentEntity = attachment("a.txt", "submissions/10/a.txt");
         SubmissionAttachment link = linkTo(10L, attachmentEntity);
         when(submissionAttachmentRepository.findWithAttachmentBySubmissionIdIn(List.of(10L, 20L)))
                 .thenReturn(List.of(link));
 
-        Page<SubmissionListResponse> result = service.getMySubmissions(3L, requested);
+        Page<SubmissionListResponse> result = service.getMySubmissions(
+                3L, false, MySubmissionSort.DUE_AT_DESC, requested);
 
         assertThat(result.getContent()).hasSize(2);
         assertThat(result.getContent().get(0).getAttachments()).extracting(SubmissionFileResponse::getOriginalName)
                 .containsExactly("a.txt");
+        assertThat(result.getContent().get(0).getFileNames()).containsExactly("a.txt");
         assertThat(result.getContent().get(1).getAttachments()).isEmpty();
+        assertThat(result.getContent().get(1).getFileNames()).isEmpty();
+        verify(submissionAttachmentRepository).findWithAttachmentBySubmissionIdIn(List.of(10L, 20L));
+    }
+
+    @Test
+    void getMySubmissionsMixedPageQueriesAttachmentsWithOnlyNonNullSubmissionIds() {
+        Member student = student(3L);
+        stubApprovedMember(3L, student);
+        SubmissionListResponse submitted = listRow(10L, 1L);
+        SubmissionListResponse notSubmitted = listRow(null, 2L);
+        Pageable pageable = PageRequest.of(0, 20);
+        when(submissionRepository.findMySubmissionPageDueAtDesc(3L, true, pageable))
+                .thenReturn(new PageImpl<>(List.of(submitted, notSubmitted), pageable, 2));
+        Attachment attachmentEntity = attachment("a.txt", "submissions/10/a.txt");
+        SubmissionAttachment attachmentLink = linkTo(10L, attachmentEntity);
+        when(submissionAttachmentRepository.findWithAttachmentBySubmissionIdIn(List.of(10L)))
+                .thenReturn(List.of(attachmentLink));
+
+        Page<SubmissionListResponse> result = service.getMySubmissions(
+                3L, true, MySubmissionSort.DUE_AT_DESC, pageable);
+
+        assertThat(result.getContent()).containsExactly(submitted, notSubmitted);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+        verify(submissionAttachmentRepository).findWithAttachmentBySubmissionIdIn(List.of(10L));
+        assertThat(notSubmitted.getAttachments()).isEmpty();
+        assertThat(notSubmitted.getFileNames()).isEmpty();
+    }
+
+    @Test
+    void getMySubmissionsAllNotSubmittedPageSkipsAttachmentQueryAndKeepsPageMetadata() {
+        Member student = student(3L);
+        stubApprovedMember(3L, student);
+        SubmissionListResponse first = listRow(null, 1L);
+        SubmissionListResponse second = listRow(null, 2L);
+        Pageable pageable = PageRequest.of(0, 2);
+        when(submissionRepository.findMySubmissionPageDueAtDesc(3L, true, pageable))
+                .thenReturn(new PageImpl<>(List.of(first, second), pageable, 5));
+
+        Page<SubmissionListResponse> result = service.getMySubmissions(
+                3L, true, MySubmissionSort.DUE_AT_DESC, pageable);
+
+        assertThat(result.getContent()).containsExactly(first, second);
+        assertThat(result.getTotalElements()).isEqualTo(5);
+        assertThat(result.getTotalPages()).isEqualTo(3);
+        assertThat(first.getAttachments()).isEmpty();
+        assertThat(first.getFileNames()).isEmpty();
+        assertThat(second.getAttachments()).isEmpty();
+        assertThat(second.getFileNames()).isEmpty();
+        verify(submissionAttachmentRepository, never()).findWithAttachmentBySubmissionIdIn(any());
     }
 
     @Test
@@ -453,10 +506,11 @@ class SubmissionServiceTest {
         Member student = student(3L);
         stubApprovedMember(3L, student);
         Pageable pageable = PageRequest.of(0, 20);
-        when(submissionRepository.findSubmissionPageByStudentId(3L, pageable))
+        when(submissionRepository.findMySubmissionPageDueAtDesc(3L, false, pageable))
                 .thenReturn(new PageImpl<>(List.of(), pageable, 0));
 
-        Page<SubmissionListResponse> result = service.getMySubmissions(3L, pageable);
+        Page<SubmissionListResponse> result = service.getMySubmissions(
+                3L, false, MySubmissionSort.DUE_AT_DESC, pageable);
 
         assertThat(result.getContent()).isEmpty();
         verify(submissionAttachmentRepository, never()).findWithAttachmentBySubmissionIdIn(any());
@@ -468,10 +522,11 @@ class SubmissionServiceTest {
         when(admin.getRole()).thenReturn(MemberRole.ADMIN);
         stubApprovedMember(7L, admin);
 
-        assertThatThrownBy(() -> service.getMySubmissions(7L, PageRequest.of(0, 20)))
+        assertThatThrownBy(() -> service.getMySubmissions(
+                7L, false, MySubmissionSort.DUE_AT_DESC, PageRequest.of(0, 20)))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
-        verify(submissionRepository, never()).findSubmissionPageByStudentId(any(), any());
+        verify(submissionRepository, never()).findMySubmissionPageDueAtDesc(any(), anyBoolean(), any());
     }
 
     @Test
@@ -875,6 +930,13 @@ class SubmissionServiceTest {
         return request;
     }
 
+    private SubmissionListResponse listRow(Long submissionId, Long assignmentId) {
+        OffsetDateTime now = OffsetDateTime.now();
+        return new SubmissionListResponse(submissionId, assignmentId, "assignment-" + assignmentId,
+                now.plusDays(1), false, submissionId == null ? null : "text", false,
+                submissionId == null ? null : now, submissionId == null ? null : now);
+    }
+
     private Member student(Long id) {
         Member member = mock(Member.class);
         when(member.getId()).thenReturn(id);
@@ -918,7 +980,7 @@ class SubmissionServiceTest {
     private void useClock(Clock clock) {
         service = new SubmissionService(submissionRepository, assignmentRepository, memberGuard,
                 attachmentRepository, submissionAttachmentRepository, fileStorage, clock,
-                storageLifecycle, transactions);
+                storageLifecycle, transactions, new SubmissionStatusCalculator());
     }
 
     private void stubApprovedMember(Long memberId, Member member) {
