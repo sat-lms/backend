@@ -69,7 +69,11 @@ class AuthControllerSecurityTest {
 
     @Test
     void oldUnversionedLogoutPathNoLongerExists() throws Exception {
+        // #86 이전에는 이 경로가 매핑도, 시큐리티 규칙도 없어 permitAll을 타고
+        // DispatcherServlet까지 가서 404가 났다. 이제는 anyRequest().authenticated()
+        // 기본값에 걸려 시큐리티 필터 단계에서 401로 먼저 막힌다(핸들러 탐색까지
+        // 가지도 못하므로 결과적으로 경로가 없다는 사실은 여전히 드러나지 않는다).
         mockMvc.perform(post("/api/auth/logout"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isUnauthorized());
     }
 }
