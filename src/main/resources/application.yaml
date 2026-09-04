@@ -2,6 +2,13 @@ spring:
   application:
     name: lms
 
+  # 기본 프로파일은 두지 않습니다. 프로파일을 명시하지 않고 기동하면 이 파일의
+  # 공통 설정만 적용되어, 운영에 dev 설정(SQL 바인딩 로그 등)이 새는 일이 없습니다.
+  # 각 실행 경로가 프로파일을 직접 선언합니다.
+  #   컨테이너: Dockerfile의 ENV, docker-compose.yml의 SPRING_PROFILES_ACTIVE → prod
+  #   ./gradlew bootRun: build.gradle의 bootRun 태스크 → dev
+  #   테스트/CI: build.gradle의 test 태스크 → test
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -15,10 +22,8 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
-    show-sql: true
     properties:
       hibernate:
-        format_sql: true
         jdbc:
           time_zone: UTC
 

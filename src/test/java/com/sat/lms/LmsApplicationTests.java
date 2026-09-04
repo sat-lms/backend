@@ -35,8 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 				+ "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
 				+ "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,"
 				+ "org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration,"
-				+ "org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration",
-		"jwt.secret=test-secret-key-must-be-at-least-32-bytes"
+				+ "org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration"
 })
 class LmsApplicationTests {
 

@@ -1,0 +1,28 @@
+# 테스트/CI 프로파일. build.gradle의 test·s3IntegrationTest 태스크가 활성화합니다.
+spring:
+  datasource:
+    # Testcontainers 통합 테스트는 @DynamicPropertySource로 컨테이너 접속 정보를 덮어씁니다.
+    # 이 값은 DB에 실제로 붙지 않는 슬라이스 테스트가 컨텍스트를 로드할 때
+    # 필수 플레이스홀더(DB_URL 등, 기본값 없음) 때문에 실패하지 않도록 두는 더미입니다.
+    url: jdbc:postgresql://localhost:5432/test_dummy
+    username: test
+    password: test
+
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        # N+1 검증 테스트가 실행된 쿼리 수를 확인하는 데 사용합니다.
+        generate_statistics: true
+
+jwt:
+  secret: test-secret-key-must-be-at-least-32-bytes
+
+cors:
+  allowed-origins:
+    - http://localhost:5173
+
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
