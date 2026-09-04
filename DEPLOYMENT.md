@@ -47,16 +47,36 @@ docker exec -it team-postgres psql -U $DB_USERNAME -d $DB_NAME
 | `src/main/resources/application-prod.yaml` | 배포 서버 — SQL 로그 off, root INFO, CORS는 배포 도메인만 |
 | `src/test/resources/application-test.yaml` | 테스트/CI — 더미 datasource, 테스트용 jwt 시크릿 |
 
-활성화되는 프로파일은 실행 방식에 따라 정해집니다.
+**기본 프로파일(`spring.profiles.default`)은 두지 않습니다.** 프로파일을 명시하지 않고 기동하면
+`application.yaml`의 공통 설정만 적용되어, 어떤 경로로 띄우든 운영에 dev 설정이 새지 않습니다.
+대신 각 실행 경로가 자기 프로파일을 직접 선언합니다.
 
 | 실행 방식 | 프로파일 | 결정 방식 |
 | --- | --- | --- |
-| IDE, `./gradlew bootRun` | `dev` | `application.yaml`의 `spring.profiles.default` |
+| `./gradlew bootRun` | `dev` | `build.gradle` bootRun 태스크의 `spring.profiles.active` |
+| IDE 실행 | `dev` | 아래 "IDE 실행 구성" 참고 |
 | `docker compose up app` | `prod` | `docker-compose.yml`의 `SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}` |
+| `docker run` (compose 없이) | `prod` | `Dockerfile`의 `ENV SPRING_PROFILES_ACTIVE=prod` |
 | `./gradlew test`, CI | `test` | `build.gradle` test 태스크의 `spring.profiles.active` |
 
 컨테이너 기본값이 `prod`이므로 **서버 `.env`에 `SPRING_PROFILES_ACTIVE`를 넣지 않아도 운영은 prod로 뜹니다.**
 반대로 로컬에서 컨테이너를 dev 설정으로 띄우고 싶으면 개인 `.env`에 `SPRING_PROFILES_ACTIVE=dev`를 추가하세요.
+(이 경우 `.env`를 읽는 주체는 애플리케이션이 아니라 docker compose입니다.)
+
+### IDE 실행 구성
+
+IntelliJ의 **Settings → Build, Execution, Deployment → Build Tools → Gradle → Build and run using** 값에 따라 갈립니다.
+
+- `Gradle`(기본값): Spring Boot 실행 구성이 `bootRun`으로 위임되므로 위 설정이 그대로 적용됩니다. 추가 작업이 없습니다.
+- `IntelliJ IDEA`로 바꾼 경우: 실행 구성의 **Active profiles**에 `dev`를 입력하세요.
+  Community 에디션이라 해당 칸이 없다면 VM options에 `-Dspring.profiles.active=dev`를 넣거나
+  Environment variables에 `SPRING_PROFILES_ACTIVE=dev`를 설정하면 됩니다.
+
+프로파일 지정을 빠뜨리면 **앱은 에러 없이 기동되지만** SQL 로그가 찍히지 않고
+CORS 허용 목록이 비어 로컬 프론트 요청이 403으로 막힙니다. 증상이 이렇다면 이 설정을 먼저 확인하세요.
+
+`.env`에 `SPRING_PROFILES_ACTIVE`를 넣는 방식은 애플리케이션을 직접 실행할 때는 동작하지 않습니다.
+`spring-dotenv`가 프로파일이 확정된 뒤에 값을 주입하기 때문이며, 프로파일은 실제 환경변수나 `-D` 옵션으로만 지정할 수 있습니다.
 
 배포 후 실제로 어떤 프로파일이 적용됐는지는 기동 로그로 확인합니다:
 

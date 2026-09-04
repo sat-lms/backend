@@ -2,11 +2,12 @@ spring:
   application:
     name: lms
 
-  profiles:
-    # 프로파일을 지정하지 않고 실행하면(IDE, ./gradlew bootRun) dev로 동작합니다.
-    # 컨테이너 실행은 docker-compose.yml이 SPRING_PROFILES_ACTIVE로 prod를 넘기고,
-    # 테스트는 build.gradle이 test 프로파일을 활성화합니다.
-    default: dev
+  # 기본 프로파일은 두지 않습니다. 프로파일을 명시하지 않고 기동하면 이 파일의
+  # 공통 설정만 적용되어, 운영에 dev 설정(SQL 바인딩 로그 등)이 새는 일이 없습니다.
+  # 각 실행 경로가 프로파일을 직접 선언합니다.
+  #   컨테이너: Dockerfile의 ENV, docker-compose.yml의 SPRING_PROFILES_ACTIVE → prod
+  #   ./gradlew bootRun: build.gradle의 bootRun 태스크 → dev
+  #   테스트/CI: build.gradle의 test 태스크 → test
 
   datasource:
     url: ${DB_URL}

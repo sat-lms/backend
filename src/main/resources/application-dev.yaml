@@ -1,4 +1,5 @@
-# 로컬 개발용 프로파일. 프로파일 미지정 실행(IDE, ./gradlew bootRun)의 기본값입니다.
+# 로컬 개발용 프로파일. ./gradlew bootRun이 build.gradle에서 이 프로파일을 활성화합니다.
+# IDE에서 Gradle 위임 없이 실행한다면 실행 구성에 dev를 직접 지정해야 합니다.
 spring:
   jpa:
     show-sql: true
