@@ -46,6 +46,23 @@ class AuthControllerSecurityTest {
     }
 
     @Test
+    void signupWithOversizedPasswordReturnsBadRequestNotServerError() throws Exception {
+        // #83: BCrypt는 72바이트 초과 비밀번호에 encode()에서 IllegalArgumentException을
+        // 던지는데, 예전엔 이게 GlobalExceptionHandler의 catch-all로 떨어져 500이 됐다.
+        // 이제는 컨트롤러의 @Valid가 SignupRequest의 @AssertTrue에서 먼저 막아서 400이어야 한다.
+        String oversizedPassword = "a1" + "b".repeat(71);
+
+        mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"studentNumber":"20231234","name":"최인준","password":"%s","passwordConfirm":"%s"}
+                                """.formatted(oversizedPassword, oversizedPassword)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("72바이트")));
+    }
+
+    @Test
     void loginSucceedsWithoutAuthentication() throws Exception {
         LoginResponse response = new LoginResponse(1L, "20231234", "최인준", "STUDENT", "APPROVED",
                 "token", "Bearer", 3600);
