@@ -116,8 +116,7 @@ class AuthServiceTest {
         assertThat(password72Bytes.getBytes(java.nio.charset.StandardCharsets.UTF_8)).hasSize(72);
         SignupRequest request = new SignupRequest("20231234", "홍길동", password72Bytes, password72Bytes);
 
-        assertThat(validator.validate(request))
-                .noneMatch(violation -> violation.getMessage().contains("72바이트"));
+        assertThat(validator.validate(request)).isEmpty();
     }
 
     @Test
