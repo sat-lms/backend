@@ -57,11 +57,10 @@ services:
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       AWS_S3_BUCKET: ${AWS_S3_BUCKET}
       AWS_S3_PRESIGNED_EXPIRATION_MINUTES: ${AWS_S3_PRESIGNED_EXPIRATION_MINUTES:-5}
-      # JVM이 cgroup 메모리 제한(mem_limit, 바로 아래)을 인지하도록 강제한다.
-      # 힙을 컨테이너 한도의 75%로 잡아 나머지 25%를 메타스페이스/스레드 스택/
-      # 다이렉트 버퍼용으로 남긴다 — 이게 없으면 JVM이 호스트 전체 메모리(2GB) 기준으로
-      # 힙을 잡으려다 컨테이너 한도를 넘겨 OOM killer에 컨테이너가 죽을 수 있다.
-      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+      # (Temurin 17 기준) JVM은 기본적으로 cgroup 메모리 한도를 인지하지만,
+      # 힙이 컨테이너 예산을 과도하게 잠식하지 않도록 상한을 명시한다(mem_limit, 바로 아래).
+      # 힙을 컨테이너 한도의 75%로 잡아 나머지 25%를 메타스페이스/스레드 스택/다이렉트 버퍼용으로 남긴다.
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
     # postgres와 합쳐 1280m로 2GB 인스턴스에 ~768m 여유를 남긴다(계산 근거는 위 postgres
     # mem_limit 주석 참고).
     mem_limit: 768m
