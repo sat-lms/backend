@@ -28,6 +28,7 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
     Optional<Member> findByIdForUpdate(@Param("memberId") Long memberId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    // Coordination lock for withdrawal transactions; callers intentionally ignore the returned member.
     Optional<Member> findFirstByOrderByIdAsc();
 
     long countByRoleAndStatus(MemberRole role, MemberStatus status);

@@ -41,7 +41,7 @@ public class MemberController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "비활성 회원", content = @Content(schema = @Schema(implementation = ApiResponse.class))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "마지막 관리자 탈퇴 차단", content = @Content(schema = @Schema(implementation = ApiResponse.class)))
     })
-    @DeleteMapping(value = "/me", consumes = "application/json")
+    @DeleteMapping("/me")
     public ApiResponse<Void> withdraw(@Valid @RequestBody MemberWithdrawalRequest request,
                                       @AuthenticationPrincipal Long memberId) {
         memberService.withdraw(memberId, request);

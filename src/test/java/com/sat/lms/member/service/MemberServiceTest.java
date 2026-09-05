@@ -5,6 +5,7 @@ import com.sat.lms.member.dto.MemberWithdrawalRequest;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.entity.MemberStatus;
+import com.sat.lms.member.entity.InvalidMemberStateException;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.repository.MemberRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 class MemberServiceTest {
@@ -111,5 +113,26 @@ class MemberServiceTest {
         new MemberService(guard, repository, encoder)
                 .withdraw(1L, new MemberWithdrawalRequest("Password123"));
         verify(member).withdraw();
+    }
+
+    @Test
+    void unexpectedStaleDomainStateIsMappedOnlyForWithdrawalToForbidden() {
+        MemberGuard guard = mock(MemberGuard.class);
+        MemberRepository repository = mock(MemberRepository.class);
+        PasswordEncoder encoder = mock(PasswordEncoder.class);
+        Member member = mock(Member.class);
+        when(guard.requireMemberForUpdate(1L)).thenReturn(member);
+        when(member.getPasswordHash()).thenReturn("hash");
+        when(member.getRole()).thenReturn(MemberRole.STUDENT);
+        when(encoder.matches("Password123", "hash")).thenReturn(true);
+        doThrow(new InvalidMemberStateException("stale state")).when(member).withdraw();
+
+        assertThatThrownBy(() -> new MemberService(guard, repository, encoder)
+                .withdraw(1L, new MemberWithdrawalRequest("Password123")))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+                    assertThat(exception.getMessage()).isEqualTo("탈퇴하거나 정지된 계정입니다.");
+                });
+        verify(repository, never()).flush();
     }
 }

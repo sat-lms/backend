@@ -5,6 +5,7 @@ import com.sat.lms.member.dto.MemberWithdrawalRequest;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.entity.MemberStatus;
+import com.sat.lms.member.entity.InvalidMemberStateException;
 import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.global.exception.BusinessException;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,8 @@ public class MemberService {
 
     @Transactional
     public void withdraw(Long memberId, MemberWithdrawalRequest request) {
+        // All withdrawals acquire the same stable row first. The result is intentionally unused:
+        // this serializes the later target-row lock and approved-admin count check in one lock order.
         memberRepository.findFirstByOrderByIdAsc();
         Member member = memberGuard.requireMemberForUpdate(memberId);
         if (!passwordEncoder.matches(request.getCurrentPassword(), member.getPasswordHash())) {
@@ -42,7 +45,11 @@ public class MemberService {
                 && memberRepository.countByRoleAndStatus(MemberRole.ADMIN, MemberStatus.APPROVED) <= 1) {
             throw new BusinessException(HttpStatus.CONFLICT, "마지막 관리자는 회원탈퇴할 수 없습니다.");
         }
-        member.withdraw();
+        try {
+            member.withdraw();
+        } catch (InvalidMemberStateException exception) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "탈퇴하거나 정지된 계정입니다.");
+        }
         memberRepository.flush();
     }
 }

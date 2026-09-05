@@ -55,7 +55,7 @@ public class Member extends BaseEntity {
 
     public void withdraw() {
         if (status != MemberStatus.APPROVED) {
-            throw new IllegalStateException("Only an approved member can withdraw");
+            throw new InvalidMemberStateException("Only an approved member can withdraw");
         }
         this.status = MemberStatus.WITHDRAWN;
     }

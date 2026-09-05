@@ -102,4 +102,21 @@ class MemberControllerSecurityTest {
         }
         verifyNoInteractions(memberService);
     }
+
+    @Test
+    void missingWithdrawalBodyIsBadRequestInApiResponseFormat() throws Exception {
+        when(tokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(tokenProvider.getMemberId("valid-token")).thenReturn(2L);
+        when(tokenProvider.getRole("valid-token")).thenReturn("STUDENT");
+
+        mockMvc.perform(delete("/api/v1/members/me")
+                        .header("Authorization", "Bearer valid-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(content().encoding("UTF-8"))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("입력값이 올바르지 않습니다."))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        verifyNoInteractions(memberService);
+    }
 }
