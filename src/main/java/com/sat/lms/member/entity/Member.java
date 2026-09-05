@@ -53,6 +53,13 @@ public class Member extends BaseEntity {
         this.status = status;
     }
 
+    public void withdraw() {
+        if (status != MemberStatus.APPROVED) {
+            throw new IllegalStateException("Only an approved member can withdraw");
+        }
+        this.status = MemberStatus.WITHDRAWN;
+    }
+
     public Long getId() {
         return id;
     }
