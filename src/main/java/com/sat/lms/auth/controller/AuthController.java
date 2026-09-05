@@ -9,6 +9,7 @@ import com.sat.lms.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -43,10 +44,19 @@ public class AuthController {
         );
     }
 
-    @Operation(summary = "로그인", description = "APPROVED 상태의 회원만 로그인 검증을 통과합니다. 인증 토큰은 아직 발급하지 않습니다.")
-    @ApiResponses(@io.swagger.v3.oas.annotations.responses.ApiResponse(
-            responseCode = "429", description = "IP별 로그인 요청 한도 초과",
-            content = @Content(schema = @Schema(implementation = ApiResponse.class))))
+    @Operation(summary = "로그인", description = "APPROVED 회원만 로그인할 수 있습니다. 계정 존재, 비밀번호 일치, "
+            + "회원 상태 중 어느 조건이 실패했는지 구분하지 않고 동일한 401 응답을 반환합니다.")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "401", description = "인증 실패: 학번 또는 비밀번호가 올바르지 않습니다.",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class),
+                            examples = @ExampleObject(value = """
+                                    {"success":false,"message":"학번 또는 비밀번호가 올바르지 않습니다.","data":null}
+                                    """))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "429", description = "IP별 로그인 요청 한도 초과",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class)))
+    })
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.success("로그인에 성공했습니다.", authService.login(request));
