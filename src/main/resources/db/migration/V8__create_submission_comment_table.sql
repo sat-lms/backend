@@ -8,4 +8,5 @@ CREATE TABLE submission_comment (
 );
 
 CREATE INDEX idx_submission_comment_submission_id ON submission_comment (submission_id);
+CREATE INDEX idx_submission_comment_submission_id_created_at_id ON submission_comment (submission_id, created_at, id);
 CREATE INDEX idx_submission_comment_author_id ON submission_comment (author_id);
