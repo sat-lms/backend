@@ -114,6 +114,7 @@ class NoticePostgreSqlIntegrationTest {
 
     @BeforeEach
     void cleanData() {
+        jdbcTemplate.update("DELETE FROM submission_comment");
         jdbcTemplate.update("DELETE FROM submission_attachment");
         jdbcTemplate.update("DELETE FROM submission");
         jdbcTemplate.update("DELETE FROM assignment_attachment");
@@ -134,16 +135,17 @@ class NoticePostgreSqlIntegrationTest {
                 .filter(version -> version != null)
                 .map(Object::toString)
                 .toList();
-        assertThat(appliedVersions).containsExactly("1", "2", "3", "4", "5", "6", "7");
+        assertThat(appliedVersions).containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
 
         Integer tableCount = jdbcTemplate.queryForObject("""
                 SELECT count(*) FROM information_schema.tables
                 WHERE table_schema = 'public'
                   AND table_name IN ('member', 'member_review', 'notice', 'notice_read',
                                      'assignment', 'attachment', 'notice_attachment',
-                                     'assignment_attachment', 'submission', 'submission_attachment')
+                                     'assignment_attachment', 'submission', 'submission_attachment',
+                                     'submission_comment')
                 """, Integer.class);
-        assertThat(tableCount).isEqualTo(10);
+        assertThat(tableCount).isEqualTo(11);
     }
 
     @Test
