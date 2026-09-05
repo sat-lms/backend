@@ -64,5 +64,20 @@ tasks.register('s3IntegrationTest', Test) {
 	useJUnitPlatform {
 		includeTags 's3-integration'
 	}
+	reports.junitXml.required = true
+	doFirst {
+		if (providers.gradleProperty('requireS3Integration').map { it.toBoolean() }.getOrElse(false)) {
+			def requiredNames = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION',
+					'AWS_S3_BUCKET', 'AWS_S3_PRESIGNED_EXPIRATION_MINUTES']
+			def missingNames = requiredNames.findAll { name ->
+				def value = System.getenv(name)
+				value == null || value.isBlank()
+			}
+			if (!missingNames.isEmpty()) {
+				throw new GradleException('Required S3 integration environment variables are missing: '
+						+ missingNames.join(', '))
+			}
+		}
+	}
 	shouldRunAfter tasks.named('test')
 }

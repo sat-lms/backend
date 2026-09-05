@@ -1,5 +1,30 @@
 # 배포 절차
 
+## 실제 S3 통합 테스트
+
+기본 `./gradlew clean test`는 `s3-integration` 태그를 제외하므로 실제 AWS에 접근하지 않습니다. 실제 S3와
+PostgreSQL Testcontainers를 함께 검증하려면 다음 환경변수가 **현재 PowerShell 프로세스**에 있어야 합니다.
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION`
+- `AWS_S3_BUCKET`
+- `AWS_S3_PRESIGNED_EXPIRATION_MINUTES`
+
+Gradle 테스트 JVM에 `.env`가 자동 전달된다고 가정하지 마세요. `.env`를 열거나 값을 출력하지 않고
+`Test-Path Env:AWS_ACCESS_KEY_ID`처럼 각 이름의 존재 여부만 확인할 수 있습니다. 실제 실행을 강제하려면:
+
+```powershell
+.\gradlew.bat --no-daemon s3IntegrationTest -PrequireS3Integration=true
+```
+
+`requireS3Integration` 없이 실행하면 환경변수 누락 시 테스트가 assumption skip될 수 있습니다. 실행 후
+`build/test-results/s3IntegrationTest/TEST-*.xml`에서 `skipped="0"`과 실제 tests 수를 확인해야 합니다.
+테스트는 UUID 기반으로 자신이 생성한 정확한 객체 키만 추적해 삭제하며 버킷이나 도메인 prefix 전체를
+삭제하지 않습니다. 객체 존재 확인과 다운로드에는 `s3:GetObject`, 업로드·정리에는 `s3:PutObject`,
+`s3:DeleteObject`가 필요합니다. 버킷 보안 점검에는 추가로 `s3:GetBucketPublicAccessBlock` 읽기 권한이
+필요합니다. 테스트는 버킷 정책이나 Public Access Block 설정을 변경하지 않습니다.
+
 ## 인증 API 요청 제한
 
 로그인은 계정 존재 여부, 비밀번호 일치 여부, 비승인 회원 상태를 구분하지 않고 모두 같은 401 응답을
