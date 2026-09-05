@@ -22,6 +22,7 @@ import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.member.repository.MemberReviewRepository;
 import com.sat.lms.notice.repository.NoticeReadRepository;
 import com.sat.lms.notice.repository.NoticeRepository;
+import com.sat.lms.submission.repository.SubmissionCommentRepository;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import com.sat.lms.global.config.AwsProperties;
 import com.sat.lms.global.storage.FileStorage;
@@ -50,6 +51,7 @@ class LmsApplicationTests {
 	@MockitoBean NoticeAttachmentRepository noticeAttachmentRepository;
 	@MockitoBean SubmissionAttachmentRepository submissionAttachmentRepository;
 	@MockitoBean SubmissionRepository submissionRepository;
+	@MockitoBean SubmissionCommentRepository submissionCommentRepository;
 	@MockitoBean JpaMetamodelMappingContext jpaMetamodelMappingContext;
 	@MockitoBean PlatformTransactionManager transactionManager;
 	@Autowired S3Client s3Client;

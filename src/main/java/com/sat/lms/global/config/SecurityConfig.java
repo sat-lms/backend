@@ -96,6 +96,14 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/submission-attachments/*/download-url")
                         .authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/submission-attachments/**").authenticated()
+                        // {submissionId} 뒤에 /comments가 고정 리터럴로 이어지므로 *를 유지한다.
+                        // 본인/ADMIN 여부는 SubmissionCommentService에서 재확인한다(#96).
+                        .requestMatchers(HttpMethod.POST, "/api/v1/submissions/*/comments").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/submissions/*/comments").authenticated()
+                        // 경로가 댓글 ID에서 끝나므로 **로 하위 경로 추가에도 견고하게 한다.
+                        // 작성자 본인/ADMIN 여부는 SubmissionCommentService에서 재확인한다(#96).
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/submission-comments/**").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/submission-comments/**").authenticated()
                         .requestMatchers("/api/v1/members/me").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/members/me/submissions").authenticated()
                         .anyRequest().authenticated())
