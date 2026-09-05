@@ -1,5 +1,39 @@
 # 배포 절차
 
+## 인증 API 요청 제한
+
+애플리케이션은 다음 두 공개 인증 API에 IP별 인메모리 요청 제한을 적용합니다.
+
+| 경로 | 초기 운영 정책 |
+| --- | --- |
+| `POST /api/v1/auth/login` | IP당 1분에 10회 |
+| `POST /api/v1/auth/signup` | IP당 1시간에 5회 |
+
+이 횟수는 Issue 및 API 명세에 확정 수치가 없어 선택한 초기 운영 정책입니다. 로그인과 회원가입은 서로
+독립된 버킷을 사용합니다. 한도를 초과하면 HTTP 429와 함께 `Retry-After` 헤더로 현재 버킷에서 다시
+요청할 수 있을 때까지 남은 초를 반환합니다. `X-RateLimit-Limit`과 `X-RateLimit-Remaining`도 제공합니다.
+
+기본값은 다음 환경변수로 조정할 수 있습니다. capacity, period, cache 크기와 만료 시간은 모두 양수여야
+하며 잘못된 값이면 애플리케이션 기동이 실패합니다.
+
+| 환경변수 | 기본값 | 의미 |
+| --- | --- | --- |
+| `AUTH_LOGIN_RATE_LIMIT_CAPACITY` | `10` | 로그인 허용 횟수 |
+| `AUTH_LOGIN_RATE_LIMIT_PERIOD` | `1m` | 로그인 제한 주기 |
+| `AUTH_SIGNUP_RATE_LIMIT_CAPACITY` | `5` | 회원가입 허용 횟수 |
+| `AUTH_SIGNUP_RATE_LIMIT_PERIOD` | `1h` | 회원가입 제한 주기 |
+| `AUTH_RATE_LIMIT_CACHE_MAXIMUM_SIZE` | `10000` | 보관할 IP/인증 경로 버킷의 최대 개수 |
+| `AUTH_RATE_LIMIT_CACHE_EXPIRE_AFTER_ACCESS` | `2h` | 마지막 접근 후 버킷 만료 시간 |
+
+현재는 신뢰할 리버스 프록시가 정의되어 있지 않으므로 `X-Forwarded-For`와 `Forwarded` 헤더를 신뢰하지
+않고 직접 연결의 `remoteAddr`만 사용합니다. 임의의 전달 헤더를 신뢰하면 요청자가 헤더를 바꿔 제한을
+우회할 수 있습니다. 리버스 프록시를 도입할 때는 신뢰할 프록시 주소를 명시적으로 제한한 뒤 IP 해석
+정책을 함께 변경해야 합니다.
+
+이 제한 상태는 애플리케이션 인스턴스 메모리에만 존재합니다. 여러 인스턴스를 운영하면 각 인스턴스가
+별도의 허용 횟수를 가지므로 전체 서비스 기준 제한이 아닙니다. 인스턴스 전체에서 공유되는 제한이
+필요하면 Redis 같은 외부 저장소 기반 버킷을 별도 설계해야 합니다.
+
 ## 데이터베이스 연결 풀
 
 HikariCP의 최대 풀 크기는 `10개`, 연결 획득 제한 시간은 `30000ms`(30초)입니다. 기존 기본 동작을 명시한
