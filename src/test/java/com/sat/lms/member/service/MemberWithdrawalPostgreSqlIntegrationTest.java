@@ -1,5 +1,6 @@
 package com.sat.lms.member.service;
 
+import com.sat.lms.admin.service.AdminMemberService;
 import com.sat.lms.global.security.JwtTokenProvider;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.member.dto.MemberWithdrawalRequest;
@@ -56,6 +57,7 @@ class MemberWithdrawalPostgreSqlIntegrationTest {
     @Autowired PasswordEncoder passwordEncoder;
     @Autowired JwtTokenProvider tokens;
     @Autowired MemberService memberService;
+    @Autowired AdminMemberService adminMemberService;
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoBean FileStorage fileStorage;
 
@@ -228,6 +230,130 @@ class MemberWithdrawalPostgreSqlIntegrationTest {
         }
     }
 
+    @Test
+    void adminExpulsionPreservesStudentAndRelatedDataAndBlocksExistingJwt() throws Exception {
+        Long admin = member("90000006", "관리자", "ADMIN", "APPROVED", "Password123");
+        Long student = member("20230005", "학생", "STUDENT", "APPROVED", "Password123");
+        Long notice = notice(admin);
+        Long assignment = assignment(admin);
+        Long submission = submission(assignment, student);
+        Long attachment = attachment();
+        jdbc.update("INSERT INTO submission_attachment(submission_id, attachment_id) VALUES (?, ?)", submission, attachment);
+        jdbc.update("INSERT INTO notice_read(notice_id, member_id, read_at) VALUES (?, ?, now())", notice, student);
+        jdbc.update("INSERT INTO member_review(member_id, reviewer_id, action, reviewed_at) VALUES (?, ?, 'APPROVED', now())", student, admin);
+        MemberRow before = row(student);
+        String adminToken = tokens.createAccessToken(admin, "ADMIN");
+        String studentToken = tokens.createAccessToken(student, "STUDENT");
+
+        mockMvc.perform(delete("/api/v1/admin/members/{memberId}", student)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("회원을 추방했습니다."));
+
+        MemberRow after = row(student);
+        assertThat(after.status()).isEqualTo("WITHDRAWN");
+        assertThat(after.studentNumber()).isEqualTo(before.studentNumber());
+        assertThat(after.name()).isEqualTo(before.name());
+        assertThat(after.passwordHash()).isEqualTo(before.passwordHash());
+        assertThat(after.role()).isEqualTo(before.role());
+        assertThat(after.createdAt()).isEqualTo(before.createdAt());
+        assertThat(after.updatedAt()).isAfter(before.updatedAt());
+        assertThat(count("member", "id", student)).isOne();
+        assertThat(count("submission", "id", submission)).isOne();
+        assertThat(count("attachment", "id", attachment)).isOne();
+        assertThat(count("submission_attachment", "submission_id", submission)).isOne();
+        assertThat(count("notice_read", "member_id", student)).isOne();
+        assertThat(count("member_review", "member_id", student)).isOne();
+        mockMvc.perform(get("/api/v1/members/me").header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/assignments").header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"studentNumber\":\"20230005\",\"password\":\"Password123\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("학번 또는 비밀번호가 올바르지 않습니다."));
+        mockMvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"studentNumber\":\"20230005\",\"name\":\"재가입\","
+                                + "\"password\":\"Password123\",\"passwordConfirm\":\"Password123\"}"))
+                .andExpect(status().isConflict());
+        verifyNoInteractions(fileStorage);
+    }
+
+    @Test
+    void twoAdminsConcurrentlyExpellingSameStudentSucceedOnlyOnce() throws Exception {
+        Long firstAdmin = member("90000007", "관리자1", "ADMIN", "APPROVED", "Password123");
+        Long secondAdmin = member("90000008", "관리자2", "ADMIN", "APPROVED", "Password123");
+        Long student = member("20230006", "학생", "STUDENT", "APPROVED", "Password123");
+        assertOneConcurrentSuccess(() -> adminMemberService.expel(firstAdmin, student),
+                () -> adminMemberService.expel(secondAdmin, student));
+        assertThat(row(student).status()).isEqualTo("WITHDRAWN");
+    }
+
+    @Test
+    void voluntaryWithdrawalAndAdminExpulsionOfSameStudentSucceedOnlyOnce() throws Exception {
+        Long admin = member("90000009", "관리자", "ADMIN", "APPROVED", "Password123");
+        Long student = member("20230007", "학생", "STUDENT", "APPROVED", "Password123");
+        assertOneConcurrentSuccess(() -> memberService.withdraw(student, new MemberWithdrawalRequest("Password123")),
+                () -> adminMemberService.expel(admin, student));
+        assertThat(row(student).status()).isEqualTo("WITHDRAWN");
+    }
+
+    @Test
+    void expulsionRollsBackStatusAndAuditTimestamp() {
+        Long admin = member("90000010", "관리자", "ADMIN", "APPROVED", "Password123");
+        Long student = member("20230008", "학생", "STUDENT", "APPROVED", "Password123");
+        MemberRow before = row(student);
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            adminMemberService.expel(admin, student);
+            status.setRollbackOnly();
+        });
+        assertThat(row(student)).isEqualTo(before);
+    }
+
+    @Test
+    void inactiveAdminWithExistingJwtCannotExpelAndStudentCannotCallAdminPath() throws Exception {
+        Long inactiveAdmin = member("90000011", "비활성관리자", "ADMIN", "WITHDRAWN", "Password123");
+        Long student = member("20230009", "학생", "STUDENT", "APPROVED", "Password123");
+        String inactiveToken = tokens.createAccessToken(inactiveAdmin, "ADMIN");
+        String studentToken = tokens.createAccessToken(student, "STUDENT");
+        mockMvc.perform(delete("/api/v1/admin/members/{memberId}", student)
+                        .header("Authorization", "Bearer " + inactiveToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/admin/members/{memberId}", student)
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isForbidden());
+        assertThat(row(student).status()).isEqualTo("APPROVED");
+    }
+
+    private void assertOneConcurrentSuccess(ThrowingOperation first, ThrowingOperation second) throws Exception {
+        var ready = new CountDownLatch(2);
+        var start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var one = executor.submit(() -> runAfterStart(first, ready, start));
+            var two = executor.submit(() -> runAfterStart(second, ready, start));
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            int successes = (one.get(10, TimeUnit.SECONDS) ? 1 : 0) + (two.get(10, TimeUnit.SECONDS) ? 1 : 0);
+            assertThat(successes).isOne();
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    private boolean runAfterStart(ThrowingOperation operation, CountDownLatch ready, CountDownLatch start) {
+        ready.countDown();
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) return false;
+            operation.run();
+            return true;
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
     private boolean withdrawAfterStart(Long id, CountDownLatch ready, CountDownLatch start) {
         ready.countDown();
         try {
@@ -274,4 +400,9 @@ class MemberWithdrawalPostgreSqlIntegrationTest {
 
     private record MemberRow(String studentNumber, String name, String passwordHash, String role, String status,
                              OffsetDateTime createdAt, OffsetDateTime updatedAt) {}
+
+    @FunctionalInterface
+    private interface ThrowingOperation {
+        void run() throws Exception;
+    }
 }

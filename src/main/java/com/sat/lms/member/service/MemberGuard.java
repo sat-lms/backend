@@ -48,6 +48,14 @@ public class MemberGuard {
         return member;
     }
 
+    public Member requireAdminForUpdate(Long memberId) {
+        Member member = requireMemberForUpdate(memberId);
+        if (member.getRole() != MemberRole.ADMIN) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "관리자 권한이 필요합니다.");
+        }
+        return member;
+    }
+
     public Member requireStudent(Long memberId) {
         Member member = requireMember(memberId);
         if (member.getRole() != MemberRole.STUDENT) {
