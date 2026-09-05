@@ -29,6 +29,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,15 +41,18 @@ class AuthServiceTest {
     private PasswordEncoder passwordEncoder;
     private JwtTokenProvider jwtTokenProvider;
     private AuthService authService;
+    private String dummyPasswordHash;
 
     @BeforeEach
     void setUp() {
         memberRepository = mock(MemberRepository.class);
-        passwordEncoder = new BCryptPasswordEncoder(4);
+        passwordEncoder = spy(new BCryptPasswordEncoder(4));
+        dummyPasswordHash = passwordEncoder.encode("dummy-password1");
+        clearInvocations(passwordEncoder);
         jwtTokenProvider = mock(JwtTokenProvider.class);
         when(jwtTokenProvider.createAccessToken(any(), any())).thenReturn("access-token");
         when(jwtTokenProvider.getExpirationSeconds()).thenReturn(3600L);
-        authService = new AuthService(memberRepository, passwordEncoder, jwtTokenProvider);
+        authService = new AuthService(memberRepository, passwordEncoder, jwtTokenProvider, dummyPasswordHash);
     }
 
     @Test
@@ -162,7 +168,8 @@ class AuthServiceTest {
         // #83 작업 4: matches()는 encode()와 달리 내부에서 IllegalArgumentException을
         // 삼키고 false를 반환하므로(BCryptPasswordEncoder 소스 확인 + 실측), 로그인 경로는
         // 500 위험 없이 정상적으로 401을 반환한다. 실제로 저장된 회원을 대상으로 검증한다.
-        when(memberRepository.findByStudentNumber("20231234")).thenReturn(Optional.of(member(MemberStatus.APPROVED)));
+        Member approved = member(MemberStatus.APPROVED);
+        when(memberRepository.findByStudentNumber("20231234")).thenReturn(Optional.of(approved));
         String oversizedPassword = "a1" + "b".repeat(71);
 
         assertBusinessException(
@@ -176,30 +183,44 @@ class AuthServiceTest {
         Member member = member(MemberStatus.APPROVED);
         when(memberRepository.findByStudentNumber("20231234")).thenReturn(Optional.of(member));
 
-        assertThat(authService.login(new LoginRequest("20231234", "password1")).getStatus())
-                .isEqualTo("APPROVED");
-        assertThat(authService.login(new LoginRequest("20231234", "password1")).getAccessToken()).isNotBlank();
+        var response = authService.login(new LoginRequest("20231234", "password1"));
+
+        assertThat(response.getStatus()).isEqualTo("APPROVED");
+        assertThat(response.getAccessToken()).isNotBlank();
+        verify(jwtTokenProvider).createAccessToken(any(), any());
     }
 
     @ParameterizedTest
     @EnumSource(value = MemberStatus.class, names = {"PENDING", "REJECTED", "WITHDRAWN"})
-    void nonApprovedMemberCannotLogin(MemberStatus status) {
-        when(memberRepository.findByStudentNumber("20231234")).thenReturn(Optional.of(member(status)));
+    void nonApprovedMemberCannotLoginWithCorrectOrWrongPassword(MemberStatus status) {
+        Member member = member(status);
+        when(memberRepository.findByStudentNumber("20231234")).thenReturn(Optional.of(member));
 
-        assertBusinessException(
-                () -> authService.login(new LoginRequest("20231234", "password1")),
-                HttpStatus.FORBIDDEN
-        );
+        assertInvalidCredentials(() -> authService.login(new LoginRequest("20231234", "password1")));
+        assertInvalidCredentials(() -> authService.login(new LoginRequest("20231234", "wrong-password")));
+        verify(passwordEncoder).matches("password1", member.getPasswordHash());
+        verify(passwordEncoder).matches("wrong-password", member.getPasswordHash());
+        verify(jwtTokenProvider, never()).createAccessToken(any(), any());
     }
 
     @Test
     void wrongPasswordCannotLogin() {
-        when(memberRepository.findByStudentNumber("20231234")).thenReturn(Optional.of(member(MemberStatus.APPROVED)));
+        Member approved = member(MemberStatus.APPROVED);
+        when(memberRepository.findByStudentNumber("20231234")).thenReturn(Optional.of(approved));
 
-        assertBusinessException(
-                () -> authService.login(new LoginRequest("20231234", "wrong-password")),
-                HttpStatus.UNAUTHORIZED
-        );
+        assertInvalidCredentials(() -> authService.login(new LoginRequest("20231234", "wrong-password")));
+        verify(jwtTokenProvider, never()).createAccessToken(any(), any());
+    }
+
+    @Test
+    void missingMemberUsesReusableDummyHashAndDoesNotIssueJwt() {
+        when(memberRepository.findByStudentNumber("99999999")).thenReturn(Optional.empty());
+
+        assertInvalidCredentials(() -> authService.login(new LoginRequest("99999999", "wrong-password")));
+
+        verify(passwordEncoder).matches("wrong-password", dummyPasswordHash);
+        verify(passwordEncoder, never()).encode("wrong-password");
+        verify(jwtTokenProvider, never()).createAccessToken(any(), any());
     }
 
     private Member member(MemberStatus status) {
@@ -215,5 +236,15 @@ class AuthServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getStatus())
                 .isEqualTo(status);
+    }
+
+    private void assertInvalidCredentials(Runnable action) {
+        assertThatThrownBy(action::run)
+                .isInstanceOf(BusinessException.class)
+                .satisfies(exception -> {
+                    BusinessException businessException = (BusinessException) exception;
+                    assertThat(businessException.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
+                    assertThat(businessException.getMessage()).isEqualTo("학번 또는 비밀번호가 올바르지 않습니다.");
+                });
     }
 }

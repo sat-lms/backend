@@ -10,6 +10,7 @@ import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberStatus;
 import com.sat.lms.member.repository.MemberRepository;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,14 +19,20 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class AuthService {
 
+    private static final String INVALID_CREDENTIALS_MESSAGE = "학번 또는 비밀번호가 올바르지 않습니다.";
+
     private final MemberRepository memberRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final String loginDummyPasswordHash;
 
-    public AuthService(MemberRepository memberRepository, PasswordEncoder passwordEncoder, JwtTokenProvider jwtTokenProvider) {
+    public AuthService(MemberRepository memberRepository, PasswordEncoder passwordEncoder,
+                       JwtTokenProvider jwtTokenProvider,
+                       @Qualifier("loginDummyPasswordHash") String loginDummyPasswordHash) {
         this.memberRepository = memberRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.loginDummyPasswordHash = loginDummyPasswordHash;
     }
 
     @Transactional
@@ -47,29 +54,18 @@ public class AuthService {
     }
 
     public LoginResponse login(LoginRequest request) {
-        Member member = memberRepository.findByStudentNumber(request.getStudentNumber())
-                .orElseThrow(() -> new BusinessException(HttpStatus.UNAUTHORIZED, "학번 또는 비밀번호가 올바르지 않습니다."));
+        var member = memberRepository.findByStudentNumber(request.getStudentNumber());
+        String passwordHash = member.map(Member::getPasswordHash).orElse(loginDummyPasswordHash);
+        boolean passwordMatches = passwordEncoder.matches(request.getPassword(), passwordHash);
 
-        if (!passwordEncoder.matches(request.getPassword(), member.getPasswordHash())) {
-            throw new BusinessException(HttpStatus.UNAUTHORIZED, "학번 또는 비밀번호가 올바르지 않습니다.");
-        }
-        if (member.getStatus() != MemberStatus.APPROVED) {
-            throw loginBlocked(member.getStatus());
+        if (member.isEmpty() || !passwordMatches || member.get().getStatus() != MemberStatus.APPROVED) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE);
         }
 
-        String accessToken = jwtTokenProvider.createAccessToken(member.getId(), member.getRole().name());
-        return new LoginResponse(member.getId(), member.getStudentNumber(), member.getName(),
-                member.getRole().name(), member.getStatus().name(), accessToken, "Bearer",
+        Member approvedMember = member.get();
+        String accessToken = jwtTokenProvider.createAccessToken(approvedMember.getId(), approvedMember.getRole().name());
+        return new LoginResponse(approvedMember.getId(), approvedMember.getStudentNumber(), approvedMember.getName(),
+                approvedMember.getRole().name(), approvedMember.getStatus().name(), accessToken, "Bearer",
                 jwtTokenProvider.getExpirationSeconds());
-    }
-
-    private BusinessException loginBlocked(MemberStatus status) {
-        String message = switch (status) {
-            case PENDING -> "승인 대기 중인 회원입니다.";
-            case REJECTED -> "가입 신청이 거절된 회원입니다.";
-            case WITHDRAWN -> "탈퇴한 회원입니다.";
-            case APPROVED -> "로그인할 수 없는 회원 상태입니다.";
-        };
-        return new BusinessException(HttpStatus.FORBIDDEN, message);
     }
 }
