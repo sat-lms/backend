@@ -47,3 +47,15 @@ aws:
   s3:
     bucket: ${AWS_S3_BUCKET:}
     presigned-expiration-minutes: ${AWS_S3_PRESIGNED_EXPIRATION_MINUTES:5}
+
+rate-limit:
+  auth:
+    login:
+      capacity: ${AUTH_LOGIN_RATE_LIMIT_CAPACITY:10}
+      period: ${AUTH_LOGIN_RATE_LIMIT_PERIOD:1m}
+    signup:
+      capacity: ${AUTH_SIGNUP_RATE_LIMIT_CAPACITY:5}
+      period: ${AUTH_SIGNUP_RATE_LIMIT_PERIOD:1h}
+    cache:
+      maximum-size: ${AUTH_RATE_LIMIT_CACHE_MAXIMUM_SIZE:10000}
+      expire-after-access: ${AUTH_RATE_LIMIT_CACHE_EXPIRE_AFTER_ACCESS:2h}

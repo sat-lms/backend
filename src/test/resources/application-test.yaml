@@ -26,3 +26,18 @@ cors:
 logging:
   level:
     org.hibernate.SQL: DEBUG
+
+# 일반 회귀 테스트도 필터를 실제로 통과하되, 공유 Spring 테스트 컨텍스트의 요청 누적으로
+# 서로 영향을 주지 않도록 충분히 큰 테스트 전용 한도를 사용한다. 경계값은 AuthRateLimitMvcTest에서
+# 운영 기본값(로그인 10/분, 회원가입 5/시간)으로 재정의해 검증한다.
+rate-limit:
+  auth:
+    login:
+      capacity: 10000
+      period: 1m
+    signup:
+      capacity: 10000
+      period: 1h
+    cache:
+      maximum-size: 10000
+      expire-after-access: 2h

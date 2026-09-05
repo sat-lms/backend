@@ -3,10 +3,12 @@ package com.sat.lms.global.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sat.lms.global.response.ApiResponse;
 import com.sat.lms.global.security.JwtAuthenticationFilter;
+import com.sat.lms.auth.ratelimit.AuthRateLimitFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -22,6 +24,7 @@ import java.util.List;
 
 @Configuration
 @EnableConfigurationProperties(CorsProperties.class)
+@Import(com.sat.lms.auth.ratelimit.AuthRateLimitConfig.class)
 public class SecurityConfig {
     @Bean
     CorsConfigurationSource corsConfigurationSource(CorsProperties corsProperties) {
@@ -38,6 +41,7 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter,
+                                            AuthRateLimitFilter authRateLimitFilter,
                                             ObjectMapper objectMapper,
                                             CorsConfigurationSource corsConfigurationSource) throws Exception {
         return http.csrf(csrf -> csrf.disable())
@@ -106,6 +110,7 @@ public class SecurityConfig {
                     response.setCharacterEncoding(StandardCharsets.UTF_8.name());
                     objectMapper.writeValue(response.getWriter(), ApiResponse.fail("접근 권한이 없습니다."));
                 }))
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class).build();
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(authRateLimitFilter, JwtAuthenticationFilter.class).build();
     }
 }

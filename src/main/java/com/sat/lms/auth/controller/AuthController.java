@@ -7,6 +7,9 @@ import com.sat.lms.auth.dto.SignupResponse;
 import com.sat.lms.auth.service.AuthService;
 import com.sat.lms.global.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -28,6 +31,9 @@ public class AuthController {
     }
 
     @Operation(summary = "회원가입 신청", description = "가입 직후 역할은 STUDENT, 상태는 PENDING입니다.")
+    @ApiResponses(@io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "429", description = "IP별 회원가입 요청 한도 초과",
+            content = @Content(schema = @Schema(implementation = ApiResponse.class))))
     @ResponseStatus(HttpStatus.CREATED)
     @PostMapping("/signup")
     public ApiResponse<SignupResponse> signup(@Valid @RequestBody SignupRequest request) {
@@ -38,6 +44,9 @@ public class AuthController {
     }
 
     @Operation(summary = "로그인", description = "APPROVED 상태의 회원만 로그인 검증을 통과합니다. 인증 토큰은 아직 발급하지 않습니다.")
+    @ApiResponses(@io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "429", description = "IP별 로그인 요청 한도 초과",
+            content = @Content(schema = @Schema(implementation = ApiResponse.class))))
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.success("로그인에 성공했습니다.", authService.login(request));
