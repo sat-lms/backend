@@ -12,8 +12,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -53,5 +55,68 @@ class MemberControllerSecurityTest {
         mockMvc.perform(get("/api/v1/members/me").header("Authorization", "Bearer invalid-token"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void validJwtWithdrawsOnlyAuthenticatedMember() throws Exception {
+        when(tokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(tokenProvider.getMemberId("valid-token")).thenReturn(2L);
+        when(tokenProvider.getRole("valid-token")).thenReturn("STUDENT");
+
+        mockMvc.perform(delete("/api/v1/members/me")
+                        .header("Authorization", "Bearer valid-token")
+                        .contentType("application/json")
+                        .content("{\"currentPassword\":\"Password123\",\"memberId\":999}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("회원탈퇴가 완료되었습니다."))
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        verify(memberService).withdraw(org.mockito.ArgumentMatchers.eq(2L), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void unauthenticatedWithdrawalIsRejectedBeforeService() throws Exception {
+        mockMvc.perform(delete("/api/v1/members/me")
+                        .contentType("application/json")
+                        .content("{\"currentPassword\":\"Password123\"}"))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(memberService);
+    }
+
+    @Test
+    void invalidWithdrawalPasswordsAreBadRequest() throws Exception {
+        when(tokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(tokenProvider.getMemberId("valid-token")).thenReturn(2L);
+        when(tokenProvider.getRole("valid-token")).thenReturn("STUDENT");
+
+        for (String body : new String[]{"{}", "{\"currentPassword\":null}",
+                "{\"currentPassword\":\"\"}", "{\"currentPassword\":\"   \"}"}) {
+            mockMvc.perform(delete("/api/v1/members/me")
+                            .header("Authorization", "Bearer valid-token")
+                            .contentType("application/json")
+                            .content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.data").doesNotExist());
+        }
+        verifyNoInteractions(memberService);
+    }
+
+    @Test
+    void missingWithdrawalBodyIsBadRequestInApiResponseFormat() throws Exception {
+        when(tokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(tokenProvider.getMemberId("valid-token")).thenReturn(2L);
+        when(tokenProvider.getRole("valid-token")).thenReturn("STUDENT");
+
+        mockMvc.perform(delete("/api/v1/members/me")
+                        .header("Authorization", "Bearer valid-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(content().encoding("UTF-8"))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("입력값이 올바르지 않습니다."))
+                .andExpect(jsonPath("$.data").doesNotExist());
+        verifyNoInteractions(memberService);
     }
 }

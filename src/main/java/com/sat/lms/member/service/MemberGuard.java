@@ -23,10 +23,21 @@ public class MemberGuard {
     public Member requireMember(Long memberId) {
         Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
+        requireApproved(member);
+        return member;
+    }
+
+    public Member requireMemberForUpdate(Long memberId) {
+        Member member = memberRepository.findByIdForUpdate(memberId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."));
+        requireApproved(member);
+        return member;
+    }
+
+    private void requireApproved(Member member) {
         if (member.getStatus() != MemberStatus.APPROVED) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "탈퇴하거나 정지된 계정입니다.");
         }
-        return member;
     }
 
     public Member requireAdmin(Long memberId) {

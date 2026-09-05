@@ -37,6 +37,18 @@ class MemberGuardTest {
     }
 
     @Test
+    void requireMemberForUpdateUsesLockedLookupAndRejectsNonApprovedMember() {
+        Member member = member(MemberRole.STUDENT, MemberStatus.WITHDRAWN);
+        when(memberRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(member));
+
+        assertThatThrownBy(() -> guard.requireMemberForUpdate(1L))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+                    assertThat(e.getMessage()).isEqualTo("탈퇴하거나 정지된 계정입니다.");
+                });
+    }
+
+    @Test
     void requireMemberRejectsNonApprovedStatuses() {
         for (MemberStatus status : new MemberStatus[]{MemberStatus.PENDING, MemberStatus.REJECTED, MemberStatus.WITHDRAWN}) {
             Member member = member(MemberRole.STUDENT, status);

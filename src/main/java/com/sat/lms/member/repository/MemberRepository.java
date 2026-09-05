@@ -1,12 +1,15 @@
 package com.sat.lms.member.repository;
 
 import com.sat.lms.member.entity.Member;
+import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.entity.MemberStatus;
+import jakarta.persistence.LockModeType;
 import com.sat.lms.submission.dto.AdminAssignmentSubmissionCounts;
 import com.sat.lms.submission.dto.AdminSubmissionStudentRow;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -19,6 +22,16 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
     boolean existsByStudentNumber(String studentNumber);
 
     Optional<Member> findByStudentNumber(String studentNumber);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from Member m where m.id = :memberId")
+    Optional<Member> findByIdForUpdate(@Param("memberId") Long memberId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    // Coordination lock for withdrawal transactions; callers intentionally ignore the returned member.
+    Optional<Member> findFirstByOrderByIdAsc();
+
+    long countByRoleAndStatus(MemberRole role, MemberStatus status);
 
     @Query(value = """
             select new com.sat.lms.submission.dto.AdminSubmissionStudentRow(
