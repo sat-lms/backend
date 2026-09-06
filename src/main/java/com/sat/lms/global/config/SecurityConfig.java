@@ -77,10 +77,21 @@ public class SecurityConfig {
                         // 핵심 문제 사례: PATCH /assignments/*가 PATCH /assignments/*/status를
                         // 못 잡던 것과 동일 패턴) — **로 바꿔 하위 경로 추가에도 견고하게 만든다.
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/notice-attachments/**").hasRole("ADMIN")
+                        // 공지는 애초에 전체 공개라 댓글도 STUDENT/ADMIN 구분 없이 인증만 요구한다.
+                        // 아래 두 규칙이 없어도 GET은 83번째 줄의 /api/v1/notices/** 캐치올에,
+                        // POST는 맨 끝 anyRequest()에 걸려 결과적으로 같은 authenticated()가
+                        // 되지만, 나중에 그 캐치올들이 바뀌어도 이 정책만은 흔들리지 않도록
+                        // 명시적으로 먼저 선언해둔다(#104).
+                        .requestMatchers(HttpMethod.POST, "/api/v1/notices/*/comments").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/notices/*/comments").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/notices").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/notices/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/notices/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/notices/**").authenticated()
+                        // 경로가 댓글 ID에서 끝나므로 **로 하위 경로 추가에도 견고하게 한다.
+                        // 작성자 본인/ADMIN 여부는 NoticeCommentService에서 재확인한다(#104).
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/notice-comments/**").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/notice-comments/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/assignments/*/submission").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/assignments/*/submission").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/assignments/*/submission").authenticated()

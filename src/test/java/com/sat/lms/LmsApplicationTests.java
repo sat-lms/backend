@@ -20,6 +20,7 @@ import com.sat.lms.auth.service.AuthService;
 import com.sat.lms.global.exception.GlobalExceptionHandler;
 import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.member.repository.MemberReviewRepository;
+import com.sat.lms.notice.repository.NoticeCommentRepository;
 import com.sat.lms.notice.repository.NoticeReadRepository;
 import com.sat.lms.notice.repository.NoticeRepository;
 import com.sat.lms.submission.repository.SubmissionCommentRepository;
@@ -45,6 +46,7 @@ class LmsApplicationTests {
 	@MockitoBean MemberReviewRepository memberReviewRepository;
 	@MockitoBean NoticeRepository noticeRepository;
 	@MockitoBean NoticeReadRepository noticeReadRepository;
+	@MockitoBean NoticeCommentRepository noticeCommentRepository;
 	@MockitoBean AssignmentRepository assignmentRepository;
 	@MockitoBean AttachmentRepository attachmentRepository;
 	@MockitoBean AssignmentAttachmentRepository assignmentAttachmentRepository;
