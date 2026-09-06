@@ -124,7 +124,7 @@ class NoticeCommentControllerSecurityTest {
     }
 
     @Test
-    void authenticatedUserCanDeleteComment() throws Exception {
+    void authenticatedUserCanAccessDeleteEndpoint() throws Exception {
         authenticate("student", 8L, "STUDENT");
         doNothing().when(noticeCommentService).delete(1L, 8L);
 
