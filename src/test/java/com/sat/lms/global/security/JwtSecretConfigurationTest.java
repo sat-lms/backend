@@ -11,8 +11,10 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.env.StandardEnvironment;
 
 import java.time.Clock;
+import com.sat.lms.member.repository.MemberRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class JwtSecretConfigurationTest {
 
@@ -55,6 +57,11 @@ class JwtSecretConfigurationTest {
         @Bean
         Clock clock() {
             return Clock.systemUTC();
+        }
+
+        @Bean
+        MemberRepository memberRepository() {
+            return mock(MemberRepository.class);
         }
     }
 }

@@ -250,7 +250,7 @@ class MySubmissionPostgreSqlIntegrationTest {
                 .andExpect(jsonPath("$.data.totalElements").value(5))
                 .andExpect(jsonPath("$.data.totalPages").value(3));
 
-        assertThat(statistics.getQueryExecutionCount()).isEqualTo(3);
+        assertThat(statistics.getQueryExecutionCount()).isEqualTo(4);
     }
 
     @Test
@@ -272,7 +272,7 @@ class MySubmissionPostgreSqlIntegrationTest {
                 .andExpect(jsonPath("$.data.content[0].attachments.length()").value(0))
                 .andExpect(jsonPath("$.data.content[0].fileNames.length()").value(0));
 
-        assertThat(statistics.getQueryExecutionCount()).isEqualTo(2);
+        assertThat(statistics.getQueryExecutionCount()).isEqualTo(3);
     }
 
     @Test

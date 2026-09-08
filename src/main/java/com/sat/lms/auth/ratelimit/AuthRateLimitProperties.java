@@ -13,6 +13,7 @@ import java.time.Duration;
 public record AuthRateLimitProperties(
         @Valid @NotNull Limit login,
         @Valid @NotNull Limit signup,
+        @Valid @NotNull Limit reactivation,
         @Valid @NotNull Cache cache
 ) {
     public record Limit(@Positive long capacity, @NotNull Duration period) {

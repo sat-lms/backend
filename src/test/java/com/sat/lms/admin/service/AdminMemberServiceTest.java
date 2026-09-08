@@ -38,7 +38,7 @@ class AdminMemberServiceTest {
         order.verify(repository).findFirstByOrderByIdAsc();
         order.verify(guard).requireAdminForUpdate(1L);
         order.verify(guard).requireMemberForUpdate(2L);
-        order.verify(student).withdraw();
+        order.verify(student).expel();
         order.verify(repository).flush();
         verify(repository, never()).delete(org.mockito.ArgumentMatchers.any());
         verify(repository, never()).deleteById(org.mockito.ArgumentMatchers.anyLong());
@@ -65,7 +65,7 @@ class AdminMemberServiceTest {
         assertThatThrownBy(() -> service.expel(1L, 2L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
-        verify(target, never()).withdraw();
+        verify(target, never()).expel();
         verify(repository, never()).flush();
     }
 

@@ -53,6 +53,7 @@ public class SecurityConfig {
                         // 즉시 401로 드러난다(#86).
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/signup").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/reactivation-requests").permitAll()
                         // logout은 무상태 JWT라 서버가 실질적으로 아무 상태도 바꾸지 않는 완전한
                         // no-op이다(AuthController.logout() 참고). 인증을 요구해도 잃을 게 없지만,
                         // 만료된 토큰으로도 "로그아웃"은 성공해야 한다는 관점에서 공개로 유지한다.

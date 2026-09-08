@@ -263,9 +263,9 @@ class SubmissionCommentPostgreSqlIntegrationTest {
 
         // memberGuard.requireMember/submissionRepository.findById는 findById(PK get)라
         // Hibernate Statistics의 쿼리 실행 횟수에 잡히지 않는다. 여기서 세는 건 JPQL로 작성된
-        // 1) 댓글+작성자 fetch join 조회, 2) count 쿼리 = 총 2건. 작성자 수와 무관하게
+        // 1) JWT token version 조회, 2) 댓글+작성자 fetch join 조회, 3) count 쿼리 = 총 3건. 작성자 수와 무관하게
         // 고정이어야 N+1이 없다는 뜻이다.
-        assertThat(statistics.getQueryExecutionCount()).isEqualTo(2);
+        assertThat(statistics.getQueryExecutionCount()).isEqualTo(3);
     }
 
     @Test

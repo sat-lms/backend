@@ -56,6 +56,9 @@ rate-limit:
     signup:
       capacity: ${AUTH_SIGNUP_RATE_LIMIT_CAPACITY:5}
       period: ${AUTH_SIGNUP_RATE_LIMIT_PERIOD:1h}
+    reactivation:
+      capacity: ${AUTH_REACTIVATION_RATE_LIMIT_CAPACITY:5}
+      period: ${AUTH_REACTIVATION_RATE_LIMIT_PERIOD:1h}
     cache:
       maximum-size: ${AUTH_RATE_LIMIT_CACHE_MAXIMUM_SIZE:10000}
       expire-after-access: ${AUTH_RATE_LIMIT_CACHE_EXPIRE_AFTER_ACCESS:2h}

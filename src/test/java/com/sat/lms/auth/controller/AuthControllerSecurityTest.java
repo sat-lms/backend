@@ -2,6 +2,7 @@ package com.sat.lms.auth.controller;
 
 import com.sat.lms.auth.dto.LoginRequest;
 import com.sat.lms.auth.dto.LoginResponse;
+import com.sat.lms.auth.dto.ReactivationRequest;
 import com.sat.lms.auth.dto.SignupRequest;
 import com.sat.lms.auth.dto.SignupResponse;
 import com.sat.lms.auth.service.AuthService;
@@ -20,6 +21,8 @@ import java.time.OffsetDateTime;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -92,5 +95,34 @@ class AuthControllerSecurityTest {
         // 가지도 못하므로 결과적으로 경로가 없다는 사실은 여전히 드러나지 않는다).
         mockMvc.perform(post("/api/auth/logout"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void reactivationRequestSucceedsWithoutAuthenticationAndReturnsNoToken() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/reactivation-requests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"studentNumber\":\"20269997\",\"currentPassword\":\"Test1234!\","
+                                + "\"passwordConfirm\":\"Test1234!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("계정 복구 신청이 완료되었습니다. 관리자 승인을 기다려주세요."))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(jsonPath("$.accessToken").doesNotExist());
+        verify(authService).requestReactivation(any(ReactivationRequest.class));
+    }
+
+    @Test
+    void invalidReactivationFieldsAreBadRequestBeforeService() throws Exception {
+        for (String body : new String[]{"{}",
+                "{\"studentNumber\":null,\"currentPassword\":\"x\",\"passwordConfirm\":\"x\"}",
+                "{\"studentNumber\":\"20269997\",\"currentPassword\":\"\",\"passwordConfirm\":\"\"}",
+                "{\"studentNumber\":\"20269997\",\"currentPassword\":\"   \",\"passwordConfirm\":\"   \"}"}) {
+            mockMvc.perform(post("/api/v1/auth/reactivation-requests")
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.data").doesNotExist());
+        }
+        verifyNoInteractions(authService);
     }
 }

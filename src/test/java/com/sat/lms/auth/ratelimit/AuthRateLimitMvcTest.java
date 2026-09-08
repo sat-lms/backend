@@ -3,6 +3,7 @@ package com.sat.lms.auth.ratelimit;
 import com.sat.lms.auth.controller.AuthController;
 import com.sat.lms.auth.dto.LoginRequest;
 import com.sat.lms.auth.dto.SignupRequest;
+import com.sat.lms.auth.dto.ReactivationRequest;
 import com.sat.lms.auth.service.AuthService;
 import com.sat.lms.global.config.SecurityConfig;
 import com.sat.lms.global.security.JwtAuthenticationFilter;
@@ -45,6 +46,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "rate-limit.auth.login.period=1m",
         "rate-limit.auth.signup.capacity=5",
         "rate-limit.auth.signup.period=1h",
+        "rate-limit.auth.reactivation.capacity=5",
+        "rate-limit.auth.reactivation.period=1h",
         "rate-limit.auth.cache.maximum-size=100",
         "rate-limit.auth.cache.expire-after-access=2h"
 })
@@ -131,6 +134,25 @@ class AuthRateLimitMvcTest {
                 .andExpect(header().string("X-RateLimit-Remaining", "4"));
         mockMvc.perform(login("192.0.2.10"))
                 .andExpect(header().string("X-RateLimit-Remaining", "8"));
+        mockMvc.perform(reactivation("192.0.2.10"))
+                .andExpect(header().string("X-RateLimit-Limit", "5"))
+                .andExpect(header().string("X-RateLimit-Remaining", "4"));
+        mockMvc.perform(signup("192.0.2.10"))
+                .andExpect(header().string("X-RateLimit-Remaining", "3"));
+    }
+
+    @Test
+    void reactivationAllowsFiveAndRejectsSixthBeforeController() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(reactivation("192.0.2.60")).andExpect(status().isOk());
+        }
+        clearInvocations(authController, authService);
+        mockMvc.perform(reactivation("192.0.2.60"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().longValue("Retry-After", 3600))
+                .andExpect(jsonPath("$.message").value("요청이 너무 많습니다. 잠시 후 다시 시도해주세요."));
+        verify(authController, never()).requestReactivation(any(ReactivationRequest.class));
+        verify(authService, never()).requestReactivation(any(ReactivationRequest.class));
     }
 
     @Test
@@ -172,6 +194,14 @@ class AuthRateLimitMvcTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"studentNumber\":\"20231234\",\"name\":\"학생\","
                         + "\"password\":\"abc12345\",\"passwordConfirm\":\"abc12345\"}");
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder reactivation(String ip) {
+        return post("/api/v1/auth/reactivation-requests")
+                .with(remote(ip))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"studentNumber\":\"20269997\",\"currentPassword\":\"Test1234!\","
+                        + "\"passwordConfirm\":\"Test1234!\"}");
     }
 
     private RequestPostProcessor remote(String ip) {

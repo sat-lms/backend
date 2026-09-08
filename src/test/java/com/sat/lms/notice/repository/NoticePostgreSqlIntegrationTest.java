@@ -129,14 +129,14 @@ class NoticePostgreSqlIntegrationTest {
     }
 
     @Test
-    void flywayAppliesV1ThroughV4AndCreatesAllTables() {
+    void flywayAppliesAllMigrationsAndCreatesAllTables() {
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
         List<String> appliedVersions = Arrays.stream(flyway.info().applied())
                 .map(MigrationInfo::getVersion)
                 .filter(version -> version != null)
                 .map(Object::toString)
                 .toList();
-        assertThat(appliedVersions).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+        assertThat(appliedVersions).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12");
 
         Integer tableCount = jdbcTemplate.queryForObject("""
                 SELECT count(*) FROM information_schema.tables
@@ -494,12 +494,13 @@ class NoticePostgreSqlIntegrationTest {
                 firstAttachmentId);
         jdbcTemplate.update("INSERT INTO notice_attachment (notice_id, attachment_id) VALUES (?, ?), (?, ?), (?, ?)",
                 noticeId, secondAttachmentId, noticeId, firstAttachmentId, otherNoticeId, otherAttachmentId);
+        String studentToken = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
         Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         statistics.clear();
 
         mockMvc.perform(get("/api/v1/notices/{noticeId}", noticeId)
                         .header("Authorization", "Bearer "
-                                + jwtTokenProvider.createAccessToken(studentId, "STUDENT")))
+                                + studentToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.attachments.length()").value(2))
                 .andExpect(jsonPath("$.data.attachments[0].attachmentId").value(secondAttachmentId))
@@ -510,15 +511,15 @@ class NoticePostgreSqlIntegrationTest {
                 .andExpect(jsonPath("$.data.attachments[0].storedName").doesNotExist())
                 .andExpect(jsonPath("$.data.attachments[0].downloadUrl").doesNotExist());
 
-        assertThat(statistics.getPrepareStatementCount()).isEqualTo(4L);
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(5L);
 
         statistics.clear();
         mockMvc.perform(get("/api/v1/notices/{noticeId}", emptyNoticeId)
                         .header("Authorization", "Bearer "
-                                + jwtTokenProvider.createAccessToken(studentId, "STUDENT")))
+                                + studentToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.attachments.length()").value(0));
-        assertThat(statistics.getPrepareStatementCount()).isEqualTo(4L);
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(5L);
 
         mockMvc.perform(get("/api/v1/notices/{noticeId}", noticeId)
                         .header("Authorization", "Bearer "
