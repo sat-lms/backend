@@ -99,6 +99,7 @@ class AuthRateLimitStoreTest {
         return new AuthRateLimitStore(new AuthRateLimitProperties(
                 new AuthRateLimitProperties.Limit(10, Duration.ofMinutes(1)),
                 new AuthRateLimitProperties.Limit(5, Duration.ofHours(1)),
+                new AuthRateLimitProperties.Limit(5, Duration.ofHours(1)),
                 new AuthRateLimitProperties.Cache(maximumSize, expiration)), time);
     }
 

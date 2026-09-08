@@ -354,7 +354,7 @@ class AssignmentPostgreSqlIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content.length()").value(2));
 
-        assertThat(statistics.getPrepareStatementCount()).isEqualTo(3L);
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(4L);
     }
 
     @Test
@@ -402,7 +402,7 @@ class AssignmentPostgreSqlIntegrationTest {
                 .andExpect(jsonPath("$.data.attachments[0].storageKey").doesNotExist())
                 .andExpect(jsonPath("$.data.attachments[0].storedName").doesNotExist())
                 .andExpect(jsonPath("$.data.attachments[0].downloadUrl").doesNotExist());
-        assertThat(statistics.getPrepareStatementCount()).isEqualTo(3L);
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(4L);
     }
 
     @Test
@@ -593,7 +593,7 @@ class AssignmentPostgreSqlIntegrationTest {
     }
 
     private String token(Long memberId, String role) {
-        return jwtTokenProvider.createAccessToken(memberId, role);
+        return jwtTokenProvider.createAccessToken(memberId, role, 0L);
     }
 
     private void setAssignmentClock(Clock clock) {

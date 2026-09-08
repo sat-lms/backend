@@ -2,6 +2,7 @@ package com.sat.lms.auth.controller;
 
 import com.sat.lms.auth.dto.LoginRequest;
 import com.sat.lms.auth.dto.LoginResponse;
+import com.sat.lms.auth.dto.ReactivationRequest;
 import com.sat.lms.auth.dto.SignupRequest;
 import com.sat.lms.auth.dto.SignupResponse;
 import com.sat.lms.auth.service.AuthService;
@@ -60,6 +61,19 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.success("로그인에 성공했습니다.", authService.login(request));
+    }
+
+    @Operation(summary = "계정 복구 신청", description = "자진 탈퇴한 기존 회원만 신청할 수 있습니다. 신청 후 PENDING 상태가 되며 관리자 재승인 전에는 로그인하거나 JWT를 발급받을 수 없습니다. 관리자에게 추방된 회원은 복구할 수 없습니다.")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "복구 신청 완료"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "요청 필드 또는 비밀번호 확인 오류", content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "계정 복구 정보 확인 실패", content = @Content(schema = @Schema(implementation = ApiResponse.class), examples = @ExampleObject(value = "{\"success\":false,\"message\":\"계정 복구 정보를 확인할 수 없습니다.\",\"data\":null}"))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "IP별 복구 신청 요청 한도 초과", content = @Content(schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @PostMapping("/reactivation-requests")
+    public ApiResponse<Void> requestReactivation(@Valid @RequestBody ReactivationRequest request) {
+        authService.requestReactivation(request);
+        return ApiResponse.success("계정 복구 신청이 완료되었습니다. 관리자 승인을 기다려주세요.", null);
     }
 
     @Operation(summary = "로그아웃", description = "인증 시스템 연동 전에는 서버 상태를 변경하지 않습니다.")

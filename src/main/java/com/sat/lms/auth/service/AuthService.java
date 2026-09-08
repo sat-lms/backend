@@ -2,12 +2,15 @@ package com.sat.lms.auth.service;
 
 import com.sat.lms.auth.dto.LoginRequest;
 import com.sat.lms.auth.dto.LoginResponse;
+import com.sat.lms.auth.dto.ReactivationRequest;
 import com.sat.lms.auth.dto.SignupRequest;
 import com.sat.lms.auth.dto.SignupResponse;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.security.JwtTokenProvider;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberStatus;
+import com.sat.lms.member.entity.MemberDeactivationReason;
+import com.sat.lms.member.entity.InvalidMemberStateException;
 import com.sat.lms.member.repository.MemberRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -20,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthService {
 
     private static final String INVALID_CREDENTIALS_MESSAGE = "학번 또는 비밀번호가 올바르지 않습니다.";
+    private static final String INVALID_REACTIVATION_MESSAGE = "계정 복구 정보를 확인할 수 없습니다.";
 
     private final MemberRepository memberRepository;
     private final PasswordEncoder passwordEncoder;
@@ -63,9 +67,34 @@ public class AuthService {
         }
 
         Member approvedMember = member.get();
-        String accessToken = jwtTokenProvider.createAccessToken(approvedMember.getId(), approvedMember.getRole().name());
+        String accessToken = jwtTokenProvider.createAccessToken(
+                approvedMember.getId(), approvedMember.getRole().name(), approvedMember.getTokenVersion());
         return new LoginResponse(approvedMember.getId(), approvedMember.getStudentNumber(), approvedMember.getName(),
                 approvedMember.getRole().name(), approvedMember.getStatus().name(), accessToken, "Bearer",
                 jwtTokenProvider.getExpirationSeconds());
+    }
+
+    @Transactional
+    public void requestReactivation(ReactivationRequest request) {
+        if (!request.getCurrentPassword().equals(request.getPasswordConfirm())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "비밀번호와 비밀번호 확인이 일치하지 않습니다.");
+        }
+
+        memberRepository.findFirstByOrderByIdAsc();
+        var member = memberRepository.findByStudentNumberForUpdate(request.getStudentNumber());
+        String passwordHash = member.map(Member::getPasswordHash).orElse(loginDummyPasswordHash);
+        boolean passwordMatches = passwordEncoder.matches(request.getCurrentPassword(), passwordHash);
+        if (member.isEmpty() || !passwordMatches
+                || member.get().getStatus() != MemberStatus.WITHDRAWN
+                || member.get().getDeactivationReason() != MemberDeactivationReason.SELF_WITHDRAWAL) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, INVALID_REACTIVATION_MESSAGE);
+        }
+
+        try {
+            member.get().requestReactivation();
+        } catch (InvalidMemberStateException exception) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, INVALID_REACTIVATION_MESSAGE);
+        }
+        memberRepository.flush();
     }
 }

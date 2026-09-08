@@ -18,6 +18,7 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
 
     static final String LOGIN_PATH = "/api/v1/auth/login";
     static final String SIGNUP_PATH = "/api/v1/auth/signup";
+    static final String REACTIVATION_PATH = "/api/v1/auth/reactivation-requests";
     private static final String TOO_MANY_REQUESTS_MESSAGE = "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
 
     private final AuthRateLimitProperties properties;
@@ -39,16 +40,25 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
             return true;
         }
         String path = requestPath(request);
-        return !LOGIN_PATH.equals(path) && !SIGNUP_PATH.equals(path);
+        return !LOGIN_PATH.equals(path) && !SIGNUP_PATH.equals(path) && !REACTIVATION_PATH.equals(path);
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        boolean login = LOGIN_PATH.equals(requestPath(request));
-        AuthRateLimitProperties.Limit limit = login ? properties.login() : properties.signup();
-        AuthRateLimitStore.Endpoint endpoint = login
-                ? AuthRateLimitStore.Endpoint.LOGIN : AuthRateLimitStore.Endpoint.SIGNUP;
+        String path = requestPath(request);
+        AuthRateLimitProperties.Limit limit;
+        AuthRateLimitStore.Endpoint endpoint;
+        if (LOGIN_PATH.equals(path)) {
+            limit = properties.login();
+            endpoint = AuthRateLimitStore.Endpoint.LOGIN;
+        } else if (SIGNUP_PATH.equals(path)) {
+            limit = properties.signup();
+            endpoint = AuthRateLimitStore.Endpoint.SIGNUP;
+        } else {
+            limit = properties.reactivation();
+            endpoint = AuthRateLimitStore.Endpoint.REACTIVATION;
+        }
         AuthRateLimitStore.Result result = store.consume(endpoint, clientIpResolver.resolve(request), limit);
 
         response.setHeader("X-RateLimit-Limit", Long.toString(result.limit()));

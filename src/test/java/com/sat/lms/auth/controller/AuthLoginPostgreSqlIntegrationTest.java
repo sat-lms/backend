@@ -97,7 +97,7 @@ class AuthLoginPostgreSqlIntegrationTest {
         assertFailure("20260004", "password1");
         assertFailure("20260004", "wrong-password");
 
-        verify(jwtTokenProvider, times(1)).createAccessToken(any(), any());
+        verify(jwtTokenProvider, times(1)).createAccessToken(any(), any(), any(Long.class));
         memberRepository.flush();
         for (Map.Entry<Long, MemberSnapshot> entry : before.entrySet()) {
             Member current = memberRepository.findById(entry.getKey()).orElseThrow();

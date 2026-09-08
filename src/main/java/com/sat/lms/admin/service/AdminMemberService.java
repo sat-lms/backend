@@ -36,7 +36,7 @@ public class AdminMemberService {
             throw forbiddenTarget();
         }
         try {
-            target.withdraw();
+            target.expel();
         } catch (InvalidMemberStateException exception) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "탈퇴하거나 정지된 계정입니다.");
         }

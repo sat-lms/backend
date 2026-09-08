@@ -36,6 +36,13 @@ public class Member extends BaseEntity {
     @Column(name = "status", nullable = false, length = 20)
     private MemberStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "deactivation_reason", length = 30)
+    private MemberDeactivationReason deactivationReason;
+
+    @Column(name = "token_version", nullable = false)
+    private long tokenVersion;
+
     protected Member() {
     }
 
@@ -58,6 +65,26 @@ public class Member extends BaseEntity {
             throw new InvalidMemberStateException("Only an approved member can withdraw");
         }
         this.status = MemberStatus.WITHDRAWN;
+        this.deactivationReason = MemberDeactivationReason.SELF_WITHDRAWAL;
+        this.tokenVersion = Math.addExact(this.tokenVersion, 1L);
+    }
+
+    public void expel() {
+        if (status != MemberStatus.APPROVED || role != MemberRole.STUDENT) {
+            throw new InvalidMemberStateException("Only an approved student can be expelled");
+        }
+        this.status = MemberStatus.WITHDRAWN;
+        this.deactivationReason = MemberDeactivationReason.ADMIN_EXPULSION;
+        this.tokenVersion = Math.addExact(this.tokenVersion, 1L);
+    }
+
+    public void requestReactivation() {
+        if (status != MemberStatus.WITHDRAWN
+                || deactivationReason != MemberDeactivationReason.SELF_WITHDRAWAL) {
+            throw new InvalidMemberStateException("Only a self-withdrawn member can request reactivation");
+        }
+        this.status = MemberStatus.PENDING;
+        this.deactivationReason = null;
     }
 
     public Long getId() {
@@ -82,6 +109,14 @@ public class Member extends BaseEntity {
 
     public MemberStatus getStatus() {
         return status;
+    }
+
+    public MemberDeactivationReason getDeactivationReason() {
+        return deactivationReason;
+    }
+
+    public long getTokenVersion() {
+        return tokenVersion;
     }
 
 }

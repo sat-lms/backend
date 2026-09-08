@@ -23,6 +23,13 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 
     Optional<Member> findByStudentNumber(String studentNumber);
 
+    @Query("select m.tokenVersion from Member m where m.id = :memberId")
+    Optional<Long> findTokenVersionById(@Param("memberId") Long memberId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from Member m where m.studentNumber = :studentNumber")
+    Optional<Member> findByStudentNumberForUpdate(@Param("studentNumber") String studentNumber);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select m from Member m where m.id = :memberId")
     Optional<Member> findByIdForUpdate(@Param("memberId") Long memberId);

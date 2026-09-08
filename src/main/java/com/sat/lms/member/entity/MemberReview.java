@@ -5,6 +5,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Table;
 
 import java.time.OffsetDateTime;
@@ -14,7 +16,11 @@ import java.time.OffsetDateTime;
 public class MemberReview {
 
     @Id
-    @Column(name = "member_id")
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
+
+    @Column(name = "member_id", nullable = false)
     private Long memberId;
 
     @Column(name = "reviewer_id", nullable = false)
@@ -43,6 +49,10 @@ public class MemberReview {
 
     public Long getMemberId() {
         return memberId;
+    }
+
+    public Long getId() {
+        return id;
     }
 
     public Long getReviewerId() {

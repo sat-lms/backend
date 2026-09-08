@@ -65,7 +65,7 @@ public class AuthRateLimitStore {
         return nanos / oneSecond + (nanos % oneSecond == 0 ? 0 : 1);
     }
 
-    public enum Endpoint { LOGIN, SIGNUP }
+    public enum Endpoint { LOGIN, SIGNUP, REACTIVATION }
 
     private record BucketKey(Endpoint endpoint, String clientIp) { }
 

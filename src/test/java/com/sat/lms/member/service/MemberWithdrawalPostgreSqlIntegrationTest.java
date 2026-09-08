@@ -1,9 +1,12 @@
 package com.sat.lms.member.service;
 
 import com.sat.lms.admin.service.AdminMemberService;
+import com.sat.lms.auth.dto.ReactivationRequest;
+import com.sat.lms.auth.service.AuthService;
 import com.sat.lms.global.security.JwtTokenProvider;
 import com.sat.lms.global.storage.FileStorage;
 import com.sat.lms.member.dto.MemberWithdrawalRequest;
+import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,6 +61,7 @@ class MemberWithdrawalPostgreSqlIntegrationTest {
     @Autowired JwtTokenProvider tokens;
     @Autowired MemberService memberService;
     @Autowired AdminMemberService adminMemberService;
+    @Autowired AuthService authService;
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoBean FileStorage fileStorage;
 
@@ -114,17 +118,17 @@ class MemberWithdrawalPostgreSqlIntegrationTest {
         assertThat(count("member_review", "member_id", studentId)).isOne();
 
         mockMvc.perform(get("/api/v1/members/me").header("Authorization", "Bearer " + token))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/assignments").header("Authorization", "Bearer " + token))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/notices/{noticeId}", noticeId).header("Authorization", "Bearer " + token))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/members/me/submissions").header("Authorization", "Bearer " + token))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(delete("/api/v1/members/me").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"currentPassword\":\"Password123\"}"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
 
         for (String password : new String[]{"Password123", "WrongPassword1"}) {
             mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
@@ -265,9 +269,9 @@ class MemberWithdrawalPostgreSqlIntegrationTest {
         assertThat(count("notice_read", "member_id", student)).isOne();
         assertThat(count("member_review", "member_id", student)).isOne();
         mockMvc.perform(get("/api/v1/members/me").header("Authorization", "Bearer " + studentToken))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/assignments").header("Authorization", "Bearer " + studentToken))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"studentNumber\":\"20230005\",\"password\":\"Password123\"}"))
                 .andExpect(status().isUnauthorized())
@@ -323,6 +327,134 @@ class MemberWithdrawalPostgreSqlIntegrationTest {
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isForbidden());
         assertThat(row(student).status()).isEqualTo("APPROVED");
+    }
+
+    @Test
+    void selfWithdrawalReactivationReviewAndLoginCompleteWithoutReplacingMemberOrRelatedData() throws Exception {
+        Long admin = member("90000012", "관리자", "ADMIN", "APPROVED", "Password123");
+        Long student = member("20230010", "학생", "STUDENT", "APPROVED", "Password123");
+        Long notice = notice(admin);
+        Long assignment = assignment(admin);
+        Long submission = submission(assignment, student);
+        Long attachment = attachment();
+        jdbc.update("INSERT INTO submission_attachment(submission_id, attachment_id) VALUES (?, ?)", submission, attachment);
+        jdbc.update("INSERT INTO notice_read(notice_id, member_id, read_at) VALUES (?, ?, now())", notice, student);
+        jdbc.update("INSERT INTO member_review(member_id, reviewer_id, action, reviewed_at) VALUES (?, ?, 'APPROVED', now())", student, admin);
+        String oldToken = tokens.createAccessToken(student, "STUDENT");
+        memberService.withdraw(student, new MemberWithdrawalRequest("Password123"));
+
+        mockMvc.perform(post("/api/v1/auth/reactivation-requests").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"studentNumber\":\"20230010\",\"currentPassword\":\"Password123\","
+                                + "\"passwordConfirm\":\"Password123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").doesNotExist());
+        assertThat(row(student).status()).isEqualTo("PENDING");
+        assertThat(row(student).deactivationReason()).isNull();
+        mockMvc.perform(get("/api/v1/members/me").header("Authorization", "Bearer " + oldToken))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"studentNumber\":\"20230010\",\"password\":\"Password123\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        String adminToken = tokens.createAccessToken(admin, "ADMIN");
+        mockMvc.perform(get("/api/v1/admin/member-applications")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].memberId").value(student));
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/v1/admin/member-applications/{memberId}", student)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"APPROVED\"}"))
+                .andExpect(status().isOk());
+        assertThat(row(student).status()).isEqualTo("APPROVED");
+        assertThat(count("member_review", "member_id", student)).isEqualTo(2);
+        mockMvc.perform(get("/api/v1/members/me").header("Authorization", "Bearer " + oldToken))
+                .andExpect(status().isUnauthorized());
+        String loginBody = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"studentNumber\":\"20230010\",\"password\":\"Password123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.memberId").value(student))
+                .andExpect(jsonPath("$.data.accessToken").isNotEmpty())
+                .andReturn().getResponse().getContentAsString();
+        String newToken = JsonPath.read(loginBody, "$.data.accessToken");
+        mockMvc.perform(get("/api/v1/members/me").header("Authorization", "Bearer " + newToken))
+                .andExpect(status().isOk());
+        assertThat(count("member", "id", student)).isOne();
+        assertThat(count("submission", "id", submission)).isOne();
+        assertThat(count("attachment", "id", attachment)).isOne();
+        assertThat(count("submission_attachment", "submission_id", submission)).isOne();
+        assertThat(count("notice_read", "member_id", student)).isOne();
+        verifyNoInteractions(fileStorage);
+    }
+
+    @Test
+    void expelledAndLegacyWithdrawnMembersCannotReactivateWithCorrectPassword() {
+        Long admin = member("90000013", "관리자", "ADMIN", "APPROVED", "Password123");
+        Long expelled = member("20230011", "추방학생", "STUDENT", "APPROVED", "Password123");
+        Long legacy = member("20230012", "기존탈퇴", "STUDENT", "WITHDRAWN", "Password123");
+        adminMemberService.expel(admin, expelled);
+        assertInvalidReactivation("20230011");
+        assertInvalidReactivation("20230012");
+        assertThat(row(expelled).deactivationReason()).isEqualTo("ADMIN_EXPULSION");
+        assertThat(row(legacy).deactivationReason()).isNull();
+    }
+
+    @Test
+    void expulsionRevokesOnlyTargetsPreviouslyIssuedTokens() {
+        Long admin = member("90000018", "관리자", "ADMIN", "APPROVED", "Password123");
+        Long target = member("20230018", "학생", "STUDENT", "APPROVED", "Password123");
+        Long other = member("20230019", "다른학생", "STUDENT", "APPROVED", "Password123");
+        String targetToken = tokens.createAccessToken(target, "STUDENT");
+        String otherToken = tokens.createAccessToken(other, "STUDENT");
+
+        adminMemberService.expel(admin, target);
+
+        assertThat(tokens.validateToken(targetToken)).isFalse();
+        assertThat(tokens.validateToken(otherToken)).isTrue();
+        assertThat(row(target).tokenVersion()).isEqualTo(1L);
+        assertThat(row(other).tokenVersion()).isZero();
+    }
+
+    @Test
+    void concurrentReactivationRequestsSucceedOnlyOnce() throws Exception {
+        Long student = member("20230013", "학생", "STUDENT", "APPROVED", "Password123");
+        memberService.withdraw(student, new MemberWithdrawalRequest("Password123"));
+        ReactivationRequest request = new ReactivationRequest("20230013", "Password123", "Password123");
+        assertOneConcurrentSuccess(() -> authService.requestReactivation(request),
+                () -> authService.requestReactivation(request));
+        assertThat(row(student).status()).isEqualTo("PENDING");
+    }
+
+    @Test
+    void expulsionCannotBeFlippedByConcurrentReactivationAttempt() throws Exception {
+        Long admin = member("90000014", "관리자", "ADMIN", "APPROVED", "Password123");
+        Long student = member("20230014", "학생", "STUDENT", "APPROVED", "Password123");
+        ReactivationRequest request = new ReactivationRequest("20230014", "Password123", "Password123");
+        assertOneConcurrentSuccess(() -> adminMemberService.expel(admin, student),
+                () -> authService.requestReactivation(request));
+        assertThat(row(student).status()).isEqualTo("WITHDRAWN");
+        assertThat(row(student).deactivationReason()).isEqualTo("ADMIN_EXPULSION");
+    }
+
+    @Test
+    void reactivationRollbackRestoresStatusReasonAndAuditTimestamp() {
+        Long student = member("20230015", "학생", "STUDENT", "APPROVED", "Password123");
+        memberService.withdraw(student, new MemberWithdrawalRequest("Password123"));
+        MemberRow before = row(student);
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            authService.requestReactivation(new ReactivationRequest("20230015", "Password123", "Password123"));
+            status.setRollbackOnly();
+        });
+        assertThat(row(student)).isEqualTo(before);
+    }
+
+    private void assertInvalidReactivation(String studentNumber) {
+        assertThatThrownBy(() -> authService.requestReactivation(
+                new ReactivationRequest(studentNumber, "Password123", "Password123")))
+                .isInstanceOfSatisfying(com.sat.lms.global.exception.BusinessException.class,
+                        exception -> assertThat(exception.getStatus()).isEqualTo(org.springframework.http.HttpStatus.UNAUTHORIZED));
     }
 
     private void assertOneConcurrentSuccess(ThrowingOperation first, ThrowingOperation second) throws Exception {
@@ -393,13 +525,15 @@ class MemberWithdrawalPostgreSqlIntegrationTest {
     }
 
     private MemberRow row(Long id) {
-        return jdbc.queryForObject("SELECT student_number,name,password_hash,role,status,created_at,updated_at FROM member WHERE id=?",
+        return jdbc.queryForObject("SELECT student_number,name,password_hash,role,status,created_at,updated_at,deactivation_reason,token_version FROM member WHERE id=?",
                 (rs, n) -> new MemberRow(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
-                        rs.getString(5), rs.getObject(6, OffsetDateTime.class), rs.getObject(7, OffsetDateTime.class)), id);
+                        rs.getString(5), rs.getObject(6, OffsetDateTime.class), rs.getObject(7, OffsetDateTime.class),
+                        rs.getString(8), rs.getLong(9)), id);
     }
 
     private record MemberRow(String studentNumber, String name, String passwordHash, String role, String status,
-                             OffsetDateTime createdAt, OffsetDateTime updatedAt) {}
+                             OffsetDateTime createdAt, OffsetDateTime updatedAt, String deactivationReason,
+                             long tokenVersion) {}
 
     @FunctionalInterface
     private interface ThrowingOperation {

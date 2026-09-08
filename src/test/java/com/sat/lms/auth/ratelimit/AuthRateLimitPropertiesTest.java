@@ -16,6 +16,8 @@ class AuthRateLimitPropertiesTest {
                     "rate-limit.auth.login.period=1m",
                     "rate-limit.auth.signup.capacity=5",
                     "rate-limit.auth.signup.period=1h",
+                    "rate-limit.auth.reactivation.capacity=5",
+                    "rate-limit.auth.reactivation.period=1h",
                     "rate-limit.auth.cache.maximum-size=10000",
                     "rate-limit.auth.cache.expire-after-access=2h");
 

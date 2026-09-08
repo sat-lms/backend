@@ -1,6 +1,7 @@
 package com.sat.lms.auth.service;
 
 import com.sat.lms.auth.dto.LoginRequest;
+import com.sat.lms.auth.dto.ReactivationRequest;
 import com.sat.lms.auth.dto.SignupRequest;
 import com.sat.lms.auth.dto.SignupResponse;
 import com.sat.lms.global.exception.BusinessException;
@@ -50,7 +51,7 @@ class AuthServiceTest {
         dummyPasswordHash = passwordEncoder.encode("dummy-password1");
         clearInvocations(passwordEncoder);
         jwtTokenProvider = mock(JwtTokenProvider.class);
-        when(jwtTokenProvider.createAccessToken(any(), any())).thenReturn("access-token");
+        when(jwtTokenProvider.createAccessToken(any(), any(), any(Long.class))).thenReturn("access-token");
         when(jwtTokenProvider.getExpirationSeconds()).thenReturn(3600L);
         authService = new AuthService(memberRepository, passwordEncoder, jwtTokenProvider, dummyPasswordHash);
     }
@@ -187,7 +188,7 @@ class AuthServiceTest {
 
         assertThat(response.getStatus()).isEqualTo("APPROVED");
         assertThat(response.getAccessToken()).isNotBlank();
-        verify(jwtTokenProvider).createAccessToken(any(), any());
+        verify(jwtTokenProvider).createAccessToken(any(), any(), any(Long.class));
     }
 
     @ParameterizedTest
@@ -200,7 +201,7 @@ class AuthServiceTest {
         assertInvalidCredentials(() -> authService.login(new LoginRequest("20231234", "wrong-password")));
         verify(passwordEncoder).matches("password1", member.getPasswordHash());
         verify(passwordEncoder).matches("wrong-password", member.getPasswordHash());
-        verify(jwtTokenProvider, never()).createAccessToken(any(), any());
+        verify(jwtTokenProvider, never()).createAccessToken(any(), any(), any(Long.class));
     }
 
     @Test
@@ -209,7 +210,7 @@ class AuthServiceTest {
         when(memberRepository.findByStudentNumber("20231234")).thenReturn(Optional.of(approved));
 
         assertInvalidCredentials(() -> authService.login(new LoginRequest("20231234", "wrong-password")));
-        verify(jwtTokenProvider, never()).createAccessToken(any(), any());
+        verify(jwtTokenProvider, never()).createAccessToken(any(), any(), any(Long.class));
     }
 
     @Test
@@ -220,7 +221,55 @@ class AuthServiceTest {
 
         verify(passwordEncoder).matches("wrong-password", dummyPasswordHash);
         verify(passwordEncoder, never()).encode("wrong-password");
-        verify(jwtTokenProvider, never()).createAccessToken(any(), any());
+        verify(jwtTokenProvider, never()).createAccessToken(any(), any(), any(Long.class));
+    }
+
+    @Test
+    void selfWithdrawnMemberCanRequestReactivationWithoutCreatingMemberOrJwt() {
+        Member member = selfWithdrawnMember();
+        when(memberRepository.findByStudentNumberForUpdate("20231234")).thenReturn(Optional.of(member));
+
+        authService.requestReactivation(new ReactivationRequest("20231234", "password1", "password1"));
+
+        assertThat(member.getStatus()).isEqualTo(MemberStatus.PENDING);
+        assertThat(member.getDeactivationReason()).isNull();
+        verify(memberRepository).findFirstByOrderByIdAsc();
+        verify(memberRepository).flush();
+        verify(memberRepository, never()).save(any());
+        verify(jwtTokenProvider, never()).createAccessToken(any(), any(), any(Long.class));
+    }
+
+    @Test
+    void expelledLegacyAndIneligibleMembersUseSameGeneralizedFailure() {
+        for (Member member : new Member[]{expelledMember(), member(MemberStatus.WITHDRAWN),
+                member(MemberStatus.APPROVED), member(MemberStatus.PENDING), member(MemberStatus.REJECTED)}) {
+            when(memberRepository.findByStudentNumberForUpdate("20231234")).thenReturn(Optional.of(member));
+            assertInvalidReactivation(() -> authService.requestReactivation(
+                    new ReactivationRequest("20231234", "password1", "password1")));
+        }
+        verify(memberRepository, never()).flush();
+    }
+
+    @Test
+    void missingMemberUsesDummyHashAndWrongPasswordUsesSameFailure() {
+        when(memberRepository.findByStudentNumberForUpdate("99999999")).thenReturn(Optional.empty());
+        assertInvalidReactivation(() -> authService.requestReactivation(
+                new ReactivationRequest("99999999", "password1", "password1")));
+        verify(passwordEncoder).matches("password1", dummyPasswordHash);
+
+        Member member = selfWithdrawnMember();
+        when(memberRepository.findByStudentNumberForUpdate("20231234")).thenReturn(Optional.of(member));
+        assertInvalidReactivation(() -> authService.requestReactivation(
+                new ReactivationRequest("20231234", "wrong", "wrong")));
+        verify(memberRepository, never()).flush();
+    }
+
+    @Test
+    void reactivationPasswordConfirmationMismatchIsBadRequestBeforeDatabaseLookup() {
+        assertBusinessException(() -> authService.requestReactivation(
+                new ReactivationRequest("20231234", "password1", "password2")), HttpStatus.BAD_REQUEST);
+        verify(memberRepository, never()).findFirstByOrderByIdAsc();
+        verify(memberRepository, never()).findByStudentNumberForUpdate(any());
     }
 
     private Member member(MemberStatus status) {
@@ -228,6 +277,18 @@ class AuthServiceTest {
         if (status != MemberStatus.PENDING) {
             member.applyReviewResult(status);
         }
+        return member;
+    }
+
+    private Member selfWithdrawnMember() {
+        Member member = member(MemberStatus.APPROVED);
+        member.withdraw();
+        return member;
+    }
+
+    private Member expelledMember() {
+        Member member = member(MemberStatus.APPROVED);
+        member.expel();
         return member;
     }
 
@@ -245,6 +306,14 @@ class AuthServiceTest {
                     BusinessException businessException = (BusinessException) exception;
                     assertThat(businessException.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
                     assertThat(businessException.getMessage()).isEqualTo("학번 또는 비밀번호가 올바르지 않습니다.");
+                });
+    }
+
+    private void assertInvalidReactivation(Runnable action) {
+        assertThatThrownBy(action::run)
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
+                    assertThat(exception.getMessage()).isEqualTo("계정 복구 정보를 확인할 수 없습니다.");
                 });
     }
 }

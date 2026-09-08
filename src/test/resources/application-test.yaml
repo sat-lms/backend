@@ -38,6 +38,9 @@ rate-limit:
     signup:
       capacity: 10000
       period: 1h
+    reactivation:
+      capacity: 10000
+      period: 1h
     cache:
       maximum-size: 10000
       expire-after-access: 2h
