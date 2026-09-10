@@ -1,11 +1,15 @@
 package com.sat.lms.admin.service;
 
+import com.sat.lms.admin.dto.AdminMemberResponse;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.member.entity.InvalidMemberStateException;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
+import com.sat.lms.member.entity.MemberStatus;
 import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.member.service.MemberGuard;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,6 +22,13 @@ public class AdminMemberService {
     public AdminMemberService(MemberGuard memberGuard, MemberRepository memberRepository) {
         this.memberGuard = memberGuard;
         this.memberRepository = memberRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public Page<AdminMemberResponse> getMembers(Long adminId, MemberRole role, MemberStatus status,
+                                                String keyword, Pageable pageable) {
+        memberGuard.requireAdmin(adminId);
+        return memberRepository.findMemberPage(role, status, keyword, pageable);
     }
 
     @Transactional

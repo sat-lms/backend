@@ -1,17 +1,26 @@
 package com.sat.lms.admin.controller;
 
+import com.sat.lms.admin.dto.AdminMemberResponse;
 import com.sat.lms.admin.service.AdminMemberService;
 import com.sat.lms.global.response.ApiResponse;
+import com.sat.lms.global.response.PageResponse;
+import com.sat.lms.member.entity.MemberRole;
+import com.sat.lms.member.entity.MemberStatus;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Admin Member API", description = "관리자 회원 관리 API")
@@ -23,6 +32,20 @@ public class AdminMemberController {
 
     public AdminMemberController(AdminMemberService adminMemberService) {
         this.adminMemberService = adminMemberService;
+    }
+
+    @Operation(summary = "전체 회원 목록 조회",
+            description = "관리자가 역할/상태/검색어로 회원을 조회합니다. 파라미터를 생략하면 해당 조건 없이 조회하며, "
+                    + "keyword는 학번 또는 이름에 부분 일치하면 매칭됩니다. WITHDRAWN 회원도 별도 처리 없이 조회됩니다.")
+    @GetMapping
+    public ApiResponse<PageResponse<AdminMemberResponse>> getMembers(
+            @Parameter(description = "역할 필터", example = "STUDENT") @RequestParam(required = false) MemberRole role,
+            @Parameter(description = "상태 필터", example = "APPROVED") @RequestParam(required = false) MemberStatus status,
+            @Parameter(description = "학번 또는 이름 검색어") @RequestParam(required = false) String keyword,
+            @Parameter(hidden = true) @PageableDefault(size = 20) Pageable pageable,
+            @AuthenticationPrincipal Long adminId) {
+        return ApiResponse.success("회원 목록을 조회했습니다.",
+                PageResponse.from(adminMemberService.getMembers(adminId, role, status, keyword, pageable)));
     }
 
     @Operation(summary = "학생 회원 추방", description = "APPROVED ADMIN이 STUDENT 회원을 소프트 삭제합니다. 회원과 연관 데이터는 보존되며 자기 자신과 다른 ADMIN은 추방할 수 없습니다.")

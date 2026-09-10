@@ -1,5 +1,6 @@
 package com.sat.lms.member.repository;
 
+import com.sat.lms.admin.dto.AdminMemberResponse;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.entity.MemberStatus;
@@ -85,4 +86,29 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
               and m.status = com.sat.lms.member.entity.MemberStatus.APPROVED
             """)
     AdminAssignmentSubmissionCounts countSubmissionStatusByAssignmentId(@Param("assignmentId") Long assignmentId);
+
+    @Query(value = """
+            select new com.sat.lms.admin.dto.AdminMemberResponse(
+                m.id, m.studentNumber, m.name, m.role, m.status, m.createdAt)
+            from Member m
+            where (:role is null or m.role = :role)
+              and (:status is null or m.status = :status)
+              and (:keyword is null
+                   or m.studentNumber like concat('%', cast(:keyword as string), '%')
+                   or m.name like concat('%', cast(:keyword as string), '%'))
+            order by m.createdAt desc
+            """,
+            countQuery = """
+            select count(m.id)
+            from Member m
+            where (:role is null or m.role = :role)
+              and (:status is null or m.status = :status)
+              and (:keyword is null
+                   or m.studentNumber like concat('%', cast(:keyword as string), '%')
+                   or m.name like concat('%', cast(:keyword as string), '%'))
+            """)
+    Page<AdminMemberResponse> findMemberPage(@Param("role") MemberRole role,
+                                             @Param("status") MemberStatus status,
+                                             @Param("keyword") String keyword,
+                                             Pageable pageable);
 }
