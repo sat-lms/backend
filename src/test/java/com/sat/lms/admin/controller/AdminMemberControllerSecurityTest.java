@@ -1,23 +1,36 @@
 package com.sat.lms.admin.controller;
 
+import com.sat.lms.admin.dto.AdminMemberResponse;
 import com.sat.lms.admin.service.AdminMemberService;
 import com.sat.lms.global.config.SecurityConfig;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.security.JwtAuthenticationFilter;
 import com.sat.lms.global.security.JwtTokenProvider;
+import com.sat.lms.member.entity.MemberRole;
+import com.sat.lms.member.entity.MemberStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.OffsetDateTime;
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -28,6 +41,67 @@ class AdminMemberControllerSecurityTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean AdminMemberService service;
     @MockitoBean JwtTokenProvider tokens;
+
+    @Test
+    void adminCanListMembersWithFilters() throws Exception {
+        token("admin-token", 1L, "ADMIN");
+        Page<AdminMemberResponse> page = new PageImpl<>(List.of(memberResponse()));
+        when(service.getMembers(eq(1L), eq(MemberRole.STUDENT), eq(MemberStatus.APPROVED), eq("최인준"), any(Pageable.class)))
+                .thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/admin/members")
+                        .param("role", "STUDENT")
+                        .param("status", "APPROVED")
+                        .param("keyword", "최인준")
+                        .header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].memberId").value(1))
+                .andExpect(jsonPath("$.data.content[0].studentNumber").value("20231234"))
+                .andExpect(jsonPath("$.data.content[0].role").value("STUDENT"))
+                .andExpect(jsonPath("$.data.content[0].status").value("APPROVED"));
+    }
+
+    @Test
+    void adminCanListMembersWithoutAnyFilters() throws Exception {
+        token("admin-token", 1L, "ADMIN");
+        when(service.getMembers(eq(1L), isNull(), isNull(), isNull(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/v1/admin/members")
+                        .header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void unauthenticatedListReturnsUnauthorized() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/members"))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void studentCannotListMembers() throws Exception {
+        token("student-token", 2L, "STUDENT");
+        mockMvc.perform(get("/api/v1/admin/members")
+                        .header("Authorization", "Bearer student-token"))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void invalidRoleValueReturnsBadRequest() throws Exception {
+        token("admin-token", 1L, "ADMIN");
+        mockMvc.perform(get("/api/v1/admin/members")
+                        .param("role", "NOT_A_ROLE")
+                        .header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
+
+    private AdminMemberResponse memberResponse() {
+        return new AdminMemberResponse(1L, "20231234", "최인준", MemberRole.STUDENT, MemberStatus.APPROVED,
+                OffsetDateTime.now());
+    }
 
     @Test
     void approvedAdminExpelsMemberUsingJwtPrincipal() throws Exception {
