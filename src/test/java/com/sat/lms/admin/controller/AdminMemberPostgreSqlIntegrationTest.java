@@ -17,6 +17,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.OffsetDateTime;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -198,6 +200,133 @@ class AdminMemberPostgreSqlIntegrationTest {
         // 즉시 무효화 지원 이후 모든 인증 요청에 붙는 고정 비용), 2) 목록 constructor-expression
         // 조회, 3) count 쿼리 = 총 3건. 회원 수와 무관하게 고정.
         assertThat(statistics.getQueryExecutionCount()).isEqualTo(3);
+    }
+
+    @Test
+    void memberDetailWithSingleReviewIncludesReviewInfo() throws Exception {
+        Long adminId = insertMember("admin09", "관리자", "ADMIN", "APPROVED");
+        String token = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+        Long reviewerId = insertMember("admin10", "심사자", "ADMIN", "APPROVED");
+        Long targetId = insertMember("student11", "최인준", "STUDENT", "REJECTED");
+        insertReview(targetId, reviewerId, "REJECTED", "서류 미비",
+                OffsetDateTime.parse("2026-01-01T00:00:00Z"));
+
+        mockMvc.perform(get("/api/v1/admin/members/{memberId}", targetId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.memberId").value(targetId))
+                .andExpect(jsonPath("$.data.name").value("최인준"))
+                .andExpect(jsonPath("$.data.action").value("REJECTED"))
+                .andExpect(jsonPath("$.data.rejectionReason").value("서류 미비"))
+                .andExpect(jsonPath("$.data.reviewerId").value(reviewerId))
+                .andExpect(jsonPath("$.data.reviewerName").value("심사자"));
+    }
+
+    @Test
+    void memberDetailWithMultipleReviewsReturnsOnlyTheLatestOne() throws Exception {
+        // 핵심 검증 케이스: PR #107(V11)로 한 회원이 여러 심사 기록을 가질 수 있게 됐다
+        // (탈퇴 → 복구 신청 → 재승인). 오래된 기록이 섞여 반환되면 안 되고 가장 최근
+        // 기록(reviewedAt 기준)만 응답에 나와야 한다.
+        Long adminId = insertMember("admin11", "관리자", "ADMIN", "APPROVED");
+        String token = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+        Long firstReviewerId = insertMember("admin12", "최초심사자", "ADMIN", "APPROVED");
+        Long secondReviewerId = insertMember("admin13", "재승인자", "ADMIN", "APPROVED");
+        Long targetId = insertMember("student12", "김철수", "STUDENT", "APPROVED");
+        // 시간 순서: 최초 승인(오래됨) → 자진 탈퇴 후 복구 신청 재승인(최신)
+        insertReview(targetId, firstReviewerId, "APPROVED", null,
+                OffsetDateTime.parse("2026-01-01T00:00:00Z"));
+        insertReview(targetId, secondReviewerId, "APPROVED", null,
+                OffsetDateTime.parse("2026-03-01T00:00:00Z"));
+
+        mockMvc.perform(get("/api/v1/admin/members/{memberId}", targetId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.reviewerId").value(secondReviewerId))
+                .andExpect(jsonPath("$.data.reviewerName").value("재승인자"))
+                .andExpect(jsonPath("$.data.reviewedAt").value(
+                        org.hamcrest.Matchers.startsWith("2026-03-01")));
+    }
+
+    @Test
+    void memberDetailWithNoReviewHistoryLeavesReviewFieldsNull() throws Exception {
+        Long adminId = insertMember("admin14", "관리자", "ADMIN", "APPROVED");
+        String token = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+        Long pendingId = insertMember("student13", "대기학생", "STUDENT", "PENDING");
+
+        mockMvc.perform(get("/api/v1/admin/members/{memberId}", pendingId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andExpect(jsonPath("$.data.action").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.reviewerId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.reviewerName").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.reviewedAt").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void withdrawnMemberDetailIsStillAccessible() throws Exception {
+        Long adminId = insertMember("admin15", "관리자", "ADMIN", "APPROVED");
+        String token = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+        Long withdrawnId = insertMember("student14", "탈퇴학생", "STUDENT", "WITHDRAWN");
+
+        mockMvc.perform(get("/api/v1/admin/members/{memberId}", withdrawnId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("WITHDRAWN"));
+    }
+
+    @Test
+    void missingMemberDetailReturnsNotFound() throws Exception {
+        Long adminId = insertMember("admin16", "관리자", "ADMIN", "APPROVED");
+        String token = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+
+        mockMvc.perform(get("/api/v1/admin/members/{memberId}", 999999L)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void studentAndUnauthenticatedCannotGetMemberDetail() throws Exception {
+        Long studentId = insertMember("student15", "학생", "STUDENT", "APPROVED");
+        Long otherId = insertMember("student16", "학생2", "STUDENT", "APPROVED");
+        String studentToken = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
+
+        mockMvc.perform(get("/api/v1/admin/members/{memberId}", otherId)
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/admin/members/{memberId}", otherId))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void memberDetailDoesNotTriggerNPlusOneQueries() throws Exception {
+        Long adminId = insertMember("admin17", "관리자", "ADMIN", "APPROVED");
+        String token = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
+        Long reviewerId = insertMember("admin18", "심사자", "ADMIN", "APPROVED");
+        Long targetId = insertMember("student17", "학생", "STUDENT", "APPROVED");
+        insertReview(targetId, reviewerId, "APPROVED", null, OffsetDateTime.now());
+        insertReview(targetId, reviewerId, "APPROVED", null, OffsetDateTime.now().plusDays(1));
+        insertReview(targetId, reviewerId, "APPROVED", null, OffsetDateTime.now().plusDays(2));
+
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        mockMvc.perform(get("/api/v1/admin/members/{memberId}", targetId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        // 1) 토큰 버전 확인(#106), 2) 대상 회원 findById(엔티티 get, 미집계),
+        // 3) 최신 심사 기록 조회, 4) 심사자 findById(엔티티 get, 미집계) = 실제 집계되는
+        // JPQL @Query 실행은 1)+3) 두 건뿐이며 심사 기록이 몇 건 있든 고정이어야 한다.
+        assertThat(statistics.getQueryExecutionCount()).isEqualTo(2);
+    }
+
+    private void insertReview(Long memberId, Long reviewerId, String action, String rejectionReason,
+                              OffsetDateTime reviewedAt) {
+        jdbcTemplate.update("""
+                INSERT INTO member_review (member_id, reviewer_id, action, rejection_reason, reviewed_at)
+                VALUES (?, ?, ?, ?, ?)
+                """, memberId, reviewerId, action, rejectionReason, reviewedAt);
     }
 
     private void assertStatusCount(String token, String status, int expectedCount) throws Exception {
