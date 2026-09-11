@@ -1,5 +1,6 @@
 package com.sat.lms.admin.controller;
 
+import com.sat.lms.admin.dto.AdminMemberDetailResponse;
 import com.sat.lms.admin.dto.AdminMemberResponse;
 import com.sat.lms.admin.service.AdminMemberService;
 import com.sat.lms.global.response.ApiResponse;
@@ -46,6 +47,16 @@ public class AdminMemberController {
             @AuthenticationPrincipal Long adminId) {
         return ApiResponse.success("회원 목록을 조회했습니다.",
                 PageResponse.from(adminMemberService.getMembers(adminId, role, status, keyword, pageable)));
+    }
+
+    @Operation(summary = "특정 회원 상세 조회",
+            description = "회원 기본 정보와 가장 최근 심사 기록(있으면)을 함께 조회합니다. "
+                    + "심사 기록이 없거나 여러 건이어도 가장 최근 기록 하나만 반환합니다.")
+    @GetMapping("/{memberId}")
+    public ApiResponse<AdminMemberDetailResponse> getMemberDetail(@PathVariable Long memberId,
+                                                                  @AuthenticationPrincipal Long adminId) {
+        return ApiResponse.success("회원 상세 정보를 조회했습니다.",
+                adminMemberService.getMemberDetail(adminId, memberId));
     }
 
     @Operation(summary = "학생 회원 추방", description = "APPROVED ADMIN이 STUDENT 회원을 소프트 삭제합니다. 회원과 연관 데이터는 보존되며 자기 자신과 다른 ADMIN은 추방할 수 없습니다.")

@@ -1,11 +1,15 @@
 package com.sat.lms.admin.controller;
 
+import com.sat.lms.admin.dto.AdminMemberDetailResponse;
 import com.sat.lms.admin.dto.AdminMemberResponse;
 import com.sat.lms.admin.service.AdminMemberService;
 import com.sat.lms.global.config.SecurityConfig;
 import com.sat.lms.global.exception.BusinessException;
 import com.sat.lms.global.security.JwtAuthenticationFilter;
 import com.sat.lms.global.security.JwtTokenProvider;
+import com.sat.lms.member.entity.Member;
+import com.sat.lms.member.entity.MemberReview;
+import com.sat.lms.member.entity.MemberReviewAction;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.entity.MemberStatus;
 import org.junit.jupiter.api.Test;
@@ -26,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -101,6 +106,60 @@ class AdminMemberControllerSecurityTest {
     private AdminMemberResponse memberResponse() {
         return new AdminMemberResponse(1L, "20231234", "최인준", MemberRole.STUDENT, MemberStatus.APPROVED,
                 OffsetDateTime.now());
+    }
+
+    @Test
+    void adminCanGetMemberDetail() throws Exception {
+        token("admin-token", 1L, "ADMIN");
+        AdminMemberDetailResponse response = detailResponse();
+        when(service.getMemberDetail(1L, 2L)).thenReturn(response);
+
+        mockMvc.perform(get("/api/v1/admin/members/{memberId}", 2L)
+                        .header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.memberId").value(2))
+                .andExpect(jsonPath("$.data.action").value("APPROVED"))
+                .andExpect(jsonPath("$.data.reviewerId").value(9))
+                .andExpect(jsonPath("$.data.reviewerName").value("관리자1"));
+    }
+
+    @Test
+    void unauthenticatedDetailReturnsUnauthorized() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/members/2"))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void studentCannotGetMemberDetail() throws Exception {
+        token("student-token", 3L, "STUDENT");
+        mockMvc.perform(get("/api/v1/admin/members/2")
+                        .header("Authorization", "Bearer student-token"))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void missingMemberDetailReturnsNotFound() throws Exception {
+        token("admin-token", 1L, "ADMIN");
+        doThrow(new BusinessException(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."))
+                .when(service).getMemberDetail(1L, 999L);
+        mockMvc.perform(get("/api/v1/admin/members/999")
+                        .header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("존재하지 않는 회원입니다."));
+    }
+
+    private AdminMemberDetailResponse detailResponse() {
+        Member member = mock(Member.class);
+        when(member.getId()).thenReturn(2L);
+        when(member.getStudentNumber()).thenReturn("20231234");
+        when(member.getName()).thenReturn("최인준");
+        when(member.getRole()).thenReturn(MemberRole.STUDENT);
+        when(member.getStatus()).thenReturn(MemberStatus.APPROVED);
+        when(member.getCreatedAt()).thenReturn(OffsetDateTime.now());
+        MemberReview review = new MemberReview(2L, 9L, MemberReviewAction.APPROVED, null, OffsetDateTime.now());
+        return AdminMemberDetailResponse.of(member, review, "관리자1");
     }
 
     @Test
