@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -38,21 +39,23 @@ class MethodNotSupportedSecurityTest {
     @Test
     void unsupportedMethodOnAuthenticatedOnlyPathReturnsMethodNotAllowed() throws Exception {
         // /api/v1/members/me는 SecurityConfig에서 role 제한 없이 authenticated()만 걸려 있다.
-        // GET/DELETE만 매핑되어 있고 PATCH는 없다.
+        // GET(조회)/PATCH(이름 변경, #114)/DELETE(탈퇴)는 매핑되어 있지만 POST는 없다.
+        // (예전엔 PATCH가 미매핑 메서드였는데, #114에서 이름 변경 API로 PATCH /me가 추가되면서
+        // 이 테스트의 전제가 깨졌다 — POST로 교체.)
         authenticate("student-token", 1L, "STUDENT");
 
-        var result = mockMvc.perform(patch("/api/v1/members/me").header("Authorization", "Bearer student-token"))
+        var result = mockMvc.perform(post("/api/v1/members/me").header("Authorization", "Bearer student-token"))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value("지원하지 않는 요청 방식입니다."))
                 .andExpect(jsonPath("$.data").doesNotExist())
                 .andReturn();
 
-        // /api/v1/members/me에는 GET(조회)/DELETE(탈퇴)만 매핑되어 있다 — 실제로 그 목록과
-        // 일치하는 Allow 헤더가 오는지 확인한다. Spring이 Allow 값을 콤마로 합치지 않고
-        // 같은 이름의 헤더를 여러 개(메서드당 하나씩) 추가하므로 getHeaders()(복수형)로 읽는다.
-        assertThat(result.getResponse().getHeaders(HttpHeaders.ALLOW)).contains("GET", "DELETE");
-        assertThat(result.getResponse().getHeaders(HttpHeaders.ALLOW)).doesNotContain("PATCH");
+        // /api/v1/members/me에는 GET/PATCH/DELETE만 매핑되어 있다 — 실제로 그 목록과 일치하는
+        // Allow 헤더가 오는지 확인한다. Spring이 Allow 값을 콤마로 합치지 않고 같은 이름의
+        // 헤더를 여러 개(메서드당 하나씩) 추가하므로 getHeaders()(복수형)로 읽는다.
+        assertThat(result.getResponse().getHeaders(HttpHeaders.ALLOW)).contains("GET", "PATCH", "DELETE");
+        assertThat(result.getResponse().getHeaders(HttpHeaders.ALLOW)).doesNotContain("POST");
     }
 
     @Test
