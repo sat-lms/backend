@@ -1,6 +1,7 @@
 package com.sat.lms.member.service;
 
 import com.sat.lms.member.dto.MemberMeResponse;
+import com.sat.lms.member.dto.MemberNameUpdateRequest;
 import com.sat.lms.member.dto.MemberWithdrawalRequest;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
@@ -29,6 +30,14 @@ public class MemberService {
 
     public MemberMeResponse getMe(Long memberId) {
         Member member = memberGuard.requireMember(memberId);
+        return MemberMeResponse.from(member);
+    }
+
+    @Transactional
+    public MemberMeResponse updateName(Long memberId, MemberNameUpdateRequest request) {
+        Member member = memberGuard.requireMemberForUpdate(memberId);
+        member.changeName(request.getName().trim());
+        memberRepository.flush();
         return MemberMeResponse.from(member);
     }
 

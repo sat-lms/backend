@@ -2,6 +2,7 @@ package com.sat.lms.member.service;
 
 import com.sat.lms.member.dto.MemberMeResponse;
 import com.sat.lms.member.dto.MemberWithdrawalRequest;
+import com.sat.lms.member.dto.MemberNameUpdateRequest;
 import com.sat.lms.member.entity.Member;
 import com.sat.lms.member.entity.MemberRole;
 import com.sat.lms.member.entity.MemberStatus;
@@ -19,8 +20,43 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class MemberServiceTest {
+
+    @Test
+    void updateNameLocksAuthenticatedMemberFlushesAndReturnsChangedName() {
+        MemberGuard guard = mock(MemberGuard.class);
+        MemberRepository repository = mock(MemberRepository.class);
+        Member member = Member.createStudent("20231234", "기존 이름", "secret-hash");
+        when(guard.requireMemberForUpdate(1L)).thenReturn(member);
+
+        MemberMeResponse response = new MemberService(guard, repository, mock(PasswordEncoder.class))
+                .updateName(1L, new MemberNameUpdateRequest("  New Name  "));
+
+        assertThat(response.getName()).isEqualTo("New Name");
+        assertThat(member.getName()).isEqualTo("New Name");
+        assertThat(member.getStudentNumber()).isEqualTo("20231234");
+        assertThat(member.getPasswordHash()).isEqualTo("secret-hash");
+        assertThat(member.getRole()).isEqualTo(MemberRole.STUDENT);
+        assertThat(member.getStatus()).isEqualTo(MemberStatus.PENDING);
+        assertThat(member.getTokenVersion()).isZero();
+        verify(guard).requireMemberForUpdate(1L);
+        verify(repository).flush();
+    }
+
+    @Test
+    void updateNameDoesNotFlushWhenGuardRejectsInactiveMember() {
+        MemberGuard guard = mock(MemberGuard.class);
+        MemberRepository repository = mock(MemberRepository.class);
+        when(guard.requireMemberForUpdate(1L)).thenThrow(new BusinessException(HttpStatus.FORBIDDEN, "inactive"));
+
+        assertThatThrownBy(() -> new MemberService(guard, repository, mock(PasswordEncoder.class))
+                .updateName(1L, new MemberNameUpdateRequest("New Name")))
+                .isInstanceOf(BusinessException.class);
+
+        verifyNoInteractions(repository);
+    }
 
     @Test
     void getMeDoesNotExposePasswordHash() {
