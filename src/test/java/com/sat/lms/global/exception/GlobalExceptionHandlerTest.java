@@ -4,9 +4,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.mapping.PropertyPath;
 import org.springframework.data.mapping.PropertyReferenceException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+
+import java.util.List;
 
 import com.sat.lms.global.response.ApiResponse;
 import com.sat.lms.member.entity.Member;
@@ -45,6 +49,32 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getMessage()).isEqualTo("파일 최대 용량을 초과했습니다.");
+    }
+
+    @Test
+    void methodNotSupportedReturnsMethodNotAllowedWithAllowHeaderListingSupportedMethods() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleMethodNotSupported(
+                new HttpRequestMethodNotSupportedException("PATCH", List.of("GET", "DELETE")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+        assertThat(response.getHeaders().get(HttpHeaders.ALLOW)).containsExactlyInAnyOrder("GET", "DELETE");
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getMessage()).isEqualTo("지원하지 않는 요청 방식입니다.");
+    }
+
+    @Test
+    void methodNotSupportedWithoutKnownSupportedMethodsOmitsAllowHeaderWithoutNpe() {
+        // getSupportedMethods()가 null인 경우(단일 인자 생성자 경로) — header()에 null을
+        // 그대로 넘기면 NPE가 나므로, 이 경우 Allow 헤더 자체가 생략되고 405만 정상 반환돼야 한다.
+        HttpRequestMethodNotSupportedException exception = new HttpRequestMethodNotSupportedException("PATCH");
+        assertThat(exception.getSupportedMethods()).isNull();
+
+        ResponseEntity<ApiResponse<Void>> response = handler.handleMethodNotSupported(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+        assertThat(response.getHeaders().containsKey(HttpHeaders.ALLOW)).isFalse();
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getMessage()).isEqualTo("지원하지 않는 요청 방식입니다.");
     }
 
     @Test
