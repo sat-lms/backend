@@ -87,6 +87,10 @@ public class Member extends BaseEntity {
         this.deactivationReason = null;
     }
 
+    public void changeName(String name) {
+        this.name = name;
+    }
+
     public Long getId() {
         return id;
     }

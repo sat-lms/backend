@@ -2,6 +2,7 @@ package com.sat.lms.member.controller;
 
 import com.sat.lms.global.response.ApiResponse;
 import com.sat.lms.member.dto.MemberMeResponse;
+import com.sat.lms.member.dto.MemberNameUpdateRequest;
 import com.sat.lms.member.dto.MemberWithdrawalRequest;
 import com.sat.lms.member.service.MemberService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -12,6 +13,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,6 +33,24 @@ public class MemberController {
     @GetMapping("/me")
     public ApiResponse<MemberMeResponse> getMe(@AuthenticationPrincipal Long memberId) {
         return ApiResponse.success("내 정보를 조회했습니다.", memberService.getMe(memberId));
+    }
+
+    @Operation(
+            summary = "내 이름 변경",
+            description = "Bearer JWT로 인증된 본인의 이름만 변경합니다. 이름은 필수이고 공백만으로 구성될 수 없으며 "
+                    + "20자 이하여야 합니다. 한글, 영문 및 이름 중간 공백을 허용하고 앞뒤 공백은 제거합니다. "
+                    + "이름 외 회원 정보와 tokenVersion은 변경되지 않으므로 기존 JWT를 계속 사용할 수 있습니다."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "이름 변경 완료"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "이름 입력 오류", content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "미인증", content = @Content(schema = @Schema(implementation = ApiResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "승인되지 않은 회원", content = @Content(schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @PatchMapping("/me")
+    public ApiResponse<MemberMeResponse> updateName(@Valid @RequestBody MemberNameUpdateRequest request,
+                                                    @AuthenticationPrincipal Long memberId) {
+        return ApiResponse.success("이름을 변경했습니다.", memberService.updateName(memberId, request));
     }
 
     @Operation(summary = "회원탈퇴", description = "현재 비밀번호를 재확인한 뒤 회원 상태를 WITHDRAWN으로 변경합니다. 회원 데이터는 보존되며 기존 JWT는 이후 DB 상태 검증에서 차단됩니다. 동일 학번 재가입은 지원하지 않습니다.")
