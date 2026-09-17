@@ -31,6 +31,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(NoticeCommentController.class)
@@ -50,7 +51,8 @@ class NoticeCommentControllerSecurityTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"댓글입니다.\"}")
                         .header("Authorization", "Bearer student"))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.authorId").value(8L));
     }
 
     @Test
@@ -82,7 +84,8 @@ class NoticeCommentControllerSecurityTest {
 
         mockMvc.perform(get("/api/v1/notices/{noticeId}/comments", 1L)
                         .header("Authorization", "Bearer student"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].authorId").value(8L));
     }
 
     @Test
@@ -112,7 +115,8 @@ class NoticeCommentControllerSecurityTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"수정합니다.\"}")
                         .header("Authorization", "Bearer student"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.authorId").value(8L));
     }
 
     @Test
@@ -204,6 +208,7 @@ class NoticeCommentControllerSecurityTest {
 
     private NoticeCommentResponse response() {
         Member author = mock(Member.class);
+        when(author.getId()).thenReturn(8L);
         when(author.getName()).thenReturn("학생");
         when(author.getRole()).thenReturn(MemberRole.STUDENT);
         NoticeComment comment = mock(NoticeComment.class);
