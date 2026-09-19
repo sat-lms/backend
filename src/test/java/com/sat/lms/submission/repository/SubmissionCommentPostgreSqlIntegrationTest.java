@@ -79,6 +79,7 @@ class SubmissionCommentPostgreSqlIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.content").value("댓글입니다."))
+                .andExpect(jsonPath("$.data.authorId").value(studentId))
                 .andExpect(jsonPath("$.data.authorName").value("학생"))
                 .andExpect(jsonPath("$.data.authorRole").value("STUDENT"));
 
@@ -86,7 +87,8 @@ class SubmissionCommentPostgreSqlIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content.length()").value(1))
-                .andExpect(jsonPath("$.data.content[0].content").value("댓글입니다."));
+                .andExpect(jsonPath("$.data.content[0].content").value("댓글입니다."))
+                .andExpect(jsonPath("$.data.content[0].authorId").value(studentId));
     }
 
     @Test
@@ -164,7 +166,8 @@ class SubmissionCommentPostgreSqlIntegrationTest {
                         .content("{\"content\":\"수정된 댓글\"}")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content").value("수정된 댓글"));
+                .andExpect(jsonPath("$.data.content").value("수정된 댓글"))
+                .andExpect(jsonPath("$.data.authorId").value(studentId));
     }
 
     @Test

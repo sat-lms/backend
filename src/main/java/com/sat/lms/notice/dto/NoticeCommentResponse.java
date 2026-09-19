@@ -7,14 +7,16 @@ import java.time.OffsetDateTime;
 public class NoticeCommentResponse {
     private final Long commentId;
     private final String content;
+    private final Long authorId;
     private final String authorName;
     private final String authorRole;
     private final OffsetDateTime createdAt;
 
-    private NoticeCommentResponse(Long commentId, String content, String authorName, String authorRole,
-                                  OffsetDateTime createdAt) {
+    private NoticeCommentResponse(Long commentId, String content, Long authorId, String authorName,
+                                  String authorRole, OffsetDateTime createdAt) {
         this.commentId = commentId;
         this.content = content;
+        this.authorId = authorId;
         this.authorName = authorName;
         this.authorRole = authorRole;
         this.createdAt = createdAt;
@@ -24,6 +26,7 @@ public class NoticeCommentResponse {
         return new NoticeCommentResponse(
                 comment.getId(),
                 comment.getContent(),
+                comment.getAuthor().getId(),
                 comment.getAuthor().getName(),
                 comment.getAuthor().getRole().name(),
                 comment.getCreatedAt());
@@ -31,6 +34,7 @@ public class NoticeCommentResponse {
 
     public Long getCommentId() { return commentId; }
     public String getContent() { return content; }
+    public Long getAuthorId() { return authorId; }
     public String getAuthorName() { return authorName; }
     public String getAuthorRole() { return authorRole; }
     public OffsetDateTime getCreatedAt() { return createdAt; }

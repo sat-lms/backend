@@ -58,6 +58,7 @@ class SubmissionCommentServiceTest {
         SubmissionCommentResponse response = service.create(1L, 1L, "댓글입니다.");
 
         assertThat(response.getContent()).isEqualTo("댓글입니다.");
+        assertThat(response.getAuthorId()).isEqualTo(owner.getId());
         assertThat(response.getAuthorName()).isEqualTo(owner.getName());
         assertThat(response.getCommentId()).isEqualTo(100L);
     }
@@ -110,6 +111,7 @@ class SubmissionCommentServiceTest {
 
         assertThat(page.getContent()).hasSize(1);
         assertThat(page.getContent().get(0).getCommentId()).isEqualTo(5L);
+        assertThat(page.getContent().get(0).getAuthorId()).isEqualTo(owner.getId());
     }
 
     @Test
@@ -135,6 +137,7 @@ class SubmissionCommentServiceTest {
         SubmissionCommentResponse response = service.update(5L, 1L, "수정됨");
 
         assertThat(response.getContent()).isEqualTo("수정됨");
+        assertThat(response.getAuthorId()).isEqualTo(author.getId());
     }
 
     @Test
