@@ -28,11 +28,19 @@ import java.util.List;
 public class SecurityConfig {
     @Bean
     CorsConfigurationSource corsConfigurationSource(CorsProperties corsProperties) {
+        // allowCredentials(true)와 와일드카드 오리진은 함께 쓸 수 없다. 요청 시점에야 터지는
+        // 대신 기동 시점에 바로 실패시켜 잘못된 CORS_ALLOWED_ORIGINS가 배포되지 않게 한다.
+        if (corsProperties.getAllowedOrigins().stream().anyMatch(origin -> origin.contains("*"))) {
+            throw new IllegalStateException("cors.allowed-origins에는 와일드카드(*) 없이 명시적 오리진만 지정해야 합니다.");
+        }
+
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(corsProperties.getAllowedOrigins());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
-        configuration.setAllowCredentials(false);
+        configuration.setExposedHeaders(List.of("Authorization"));
+        configuration.setAllowCredentials(true);
+        configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
