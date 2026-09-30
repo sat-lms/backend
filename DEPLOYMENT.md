@@ -181,7 +181,8 @@ docker compose logs app | grep "profile is active"
 
 허용 오리진은 코드가 아니라 설정에 있습니다. 프론트 도메인이 바뀌면 서버 `.env`에
 `CORS_ALLOWED_ORIGINS`(여러 개면 콤마 구분)를 설정하고 `docker compose up -d app`으로 재기동하면 됩니다.
-운영 프로파일에는 localhost 오리진이 포함되지 않습니다.
+운영 프로파일에는 localhost 오리진이 포함되지 않습니다. 인증 정보 포함(`allowCredentials`)을 허용하므로
+와일드카드(`*`)는 쓸 수 없고, 넣으면 애플리케이션이 기동 시점에 실패합니다.
 
 ## DB_URL 관련 참고
 

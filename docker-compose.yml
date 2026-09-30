@@ -57,6 +57,8 @@ services:
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       AWS_S3_BUCKET: ${AWS_S3_BUCKET}
       AWS_S3_PRESIGNED_EXPIRATION_MINUTES: ${AWS_S3_PRESIGNED_EXPIRATION_MINUTES:-5}
+      # 프론트 오리진 허용 목록(콤마 구분). 서버 .env의 CORS_ALLOWED_ORIGINS로 덮어씁니다.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://satlms.cloud,https://www.satlms.cloud,https://satlms.vercel.app}
       # (Temurin 17 기준) JVM은 기본적으로 cgroup 메모리 한도를 인지하지만,
       # 힙이 컨테이너 예산을 과도하게 잠식하지 않도록 상한을 명시한다(mem_limit, 바로 아래).
       # 힙을 컨테이너 한도의 75%로 잡아 나머지 25%를 메타스페이스/스레드 스택/다이렉트 버퍼용으로 남긴다.
