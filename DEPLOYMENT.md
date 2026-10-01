@@ -142,7 +142,12 @@ docker exec lms-caddy caddy reload --config /etc/caddy/Caddyfile
 확인하고, 예전 내용이 보이면 `docker compose restart caddy`로 재시작하세요(재시작 중 몇 초간 접속이 끊깁니다).
 
 로컬에서 `docker compose up`으로 전체를 띄우면 `app`에 `localhost:8080`으로 접근할 수 없습니다. 로컬 개발은
-`./gradlew bootRun`을 사용하세요.
+`./gradlew bootRun`을 사용하세요. 같은 이유로 서버에서 app 상태를 직접 확인할 때도 호스트가 아니라 컨테이너 안에서
+호출합니다(CD 헬스체크도 이 방식입니다).
+
+```
+docker compose exec -T app curl -sf http://localhost:8080/v3/api-docs > /dev/null && echo OK
+```
 
 Caddy 뒤에서는 애플리케이션이 보는 `remoteAddr`가 모두 Caddy 컨테이너 IP입니다. 따라서 위
 "인증 API 요청 제한"은 현재 클라이언트별이 아니라 서비스 전체에 하나의 버킷으로 적용됩니다. 신뢰 프록시 기반
