@@ -32,8 +32,10 @@ jobs:
             sleep 5
             docker compose ps app | grep -q "Up" || (echo "배포 실패: app 컨테이너가 정상 기동되지 않았습니다" && exit 1)
 
+            # app의 8080은 호스트에 게시하지 않으므로(Caddy가 Docker 네트워크로 접근, #126)
+            # 호스트가 아니라 app 컨테이너 안에서 확인한다.
             i=1
-            until curl -sf http://localhost:8080/v3/api-docs > /dev/null; do
+            until docker compose exec -T app curl -sf http://localhost:8080/v3/api-docs > /dev/null; do
               if [ "$i" -ge 10 ]; then
                 echo "헬스체크 실패: app이 정상 응답하지 않습니다"
                 exit 1
