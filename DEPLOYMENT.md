@@ -118,6 +118,36 @@ docker compose up -d --build app
 - `app` 컨테이너가 재시작되면서 Flyway가 다시 실행되지만, 이미 적용된 마이그레이션은
   스킵되고 새로 추가된 마이그레이션만 적용됩니다.
 
+## 리버스 프록시 (Caddy)
+
+외부 요청은 `caddy` 서비스(`lms-caddy`)가 80/443으로 받아 같은 Docker 네트워크의 `app:8080`으로
+넘깁니다. `app`의 8080 포트는 호스트에 게시하지 않으므로 외부에서 Spring에 직접 접근할 수 없습니다.
+HTTPS 인증서는 Caddy가 Let's Encrypt로 자동 발급·갱신하며 `caddy_data` 볼륨에 보관합니다.
+
+| 도메인 | 용도 |
+| --- | --- |
+| `api.satlms.cloud` | API 전용 도메인 |
+| `satlms.cloud`, `www.satlms.cloud` | 프론트(Vercel)로 옮기기 전까지 API를 함께 제공 |
+
+도메인을 추가하거나 바꿀 때는 DNS A 레코드가 서버 IP를 가리키는 것을 먼저 확인한 뒤 레포의 `Caddyfile`을
+수정해 배포하고, 서버에서 설정을 다시 읽게 합니다. CD는 `app`만 재생성하므로 Caddy 설정은 자동으로
+반영되지 않습니다.
+
+```
+docker exec lms-caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+`Caddyfile`은 파일 단위로 마운트되어 있어, 편집기가 저장할 때 파일을 새로 만들면(예: 일부 vim 설정)
+컨테이너가 바뀐 내용을 보지 못합니다. `docker exec lms-caddy cat /etc/caddy/Caddyfile`로 반영 여부를
+확인하고, 예전 내용이 보이면 `docker compose restart caddy`로 재시작하세요(재시작 중 몇 초간 접속이 끊깁니다).
+
+로컬에서 `docker compose up`으로 전체를 띄우면 `app`에 `localhost:8080`으로 접근할 수 없습니다. 로컬 개발은
+`./gradlew bootRun`을 사용하세요.
+
+Caddy 뒤에서는 애플리케이션이 보는 `remoteAddr`가 모두 Caddy 컨테이너 IP입니다. 따라서 위
+"인증 API 요청 제한"은 현재 클라이언트별이 아니라 서비스 전체에 하나의 버킷으로 적용됩니다. 신뢰 프록시 기반
+IP 해석은 별도 작업으로 다룹니다.
+
 ## DB 접속
 
 postgres 포트는 호스트에 노출되지 않습니다. Docker가 iptables를 직접 조작해 ufw 규칙을

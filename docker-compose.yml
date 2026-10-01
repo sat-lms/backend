@@ -19,8 +19,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    # Lightsail 2GB RAM 인스턴스에서 app(768m)+postgres(512m)=1280m를 쓰고 나머지
-    # ~768m를 OS/sshd/docker daemon용으로 남긴다(#82). postgres는 회원 수가 적은
+    # Lightsail 2GB RAM 인스턴스에서 app(768m)+postgres(512m)+caddy(128m)=1408m를 쓰고 나머지
+    # ~640m를 OS/sshd/docker daemon용으로 남긴다(#82, #126). postgres는 회원 수가 적은
     # 소형 LMS라 512m로 충분하고, 필요해지면 이 값만 올리면 된다.
     mem_limit: 512m
     # 로그가 postgres 데이터 볼륨과 같은 디스크에 무한히 쌓여 디스크 고갈로 DB까지
@@ -63,7 +63,7 @@ services:
       # 힙이 컨테이너 예산을 과도하게 잠식하지 않도록 상한을 명시한다(mem_limit, 바로 아래).
       # 힙을 컨테이너 한도의 75%로 잡아 나머지 25%를 메타스페이스/스레드 스택/다이렉트 버퍼용으로 남긴다.
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
-    # postgres와 합쳐 1280m로 2GB 인스턴스에 ~768m 여유를 남긴다(계산 근거는 위 postgres
+    # postgres, caddy와 합쳐 1408m로 2GB 인스턴스에 ~640m 여유를 남긴다(계산 근거는 위 postgres
     # mem_limit 주석 참고).
     mem_limit: 768m
     logging:
@@ -71,8 +71,33 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # ports: 8080 외부 노출 제거. Caddy가 같은 Docker 네트워크에서 app:8080으로 접근한다.
+
+  # HTTPS 종료와 리버스 프록시. 인증서는 Caddy가 Let's Encrypt로 자동 발급·갱신하고
+  # caddy_data 볼륨에 보관하므로, 컨테이너를 재생성해도 재발급하지 않는다.
+  # Caddyfile 수정 후에는 `docker exec lms-caddy caddy reload --config /etc/caddy/Caddyfile`로 반영한다.
+  caddy:
+    image: caddy:2-alpine
+    container_name: lms-caddy
+    restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    # 정적 파일 없이 리버스 프록시만 하므로 128m면 충분하다(메모리 예산은 postgres mem_limit 주석 참고).
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres-data:
+  caddy_data:
+  caddy_config:
