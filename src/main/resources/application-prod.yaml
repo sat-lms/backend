@@ -1,4 +1,11 @@
 # 배포 서버용 프로파일. docker-compose.yml의 SPRING_PROFILES_ACTIVE 기본값이 prod입니다.
+server:
+  # 운영에서는 Caddy가 앞단에 있어 remoteAddr가 모두 Caddy 컨테이너 IP가 됩니다(#130).
+  # Tomcat RemoteIpValve가 신뢰 프록시(사설 대역, Tomcat 기본값)에서 온 요청에 한해
+  # X-Forwarded-For로 remoteAddr를 실제 클라이언트 IP로 바꿉니다. app의 8080은 호스트에
+  # 게시하지 않으므로 app에 직접 닿는 곳은 같은 Docker 네트워크의 Caddy뿐입니다.
+  forward-headers-strategy: native
+
 spring:
   jpa:
     # 소형 단일 호스트에서 쿼리 로그가 디스크를 잠식하지 않도록 운영에서는 끕니다.

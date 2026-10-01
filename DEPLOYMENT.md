@@ -55,10 +55,16 @@ Gradle 테스트 JVM에 `.env`가 자동 전달된다고 가정하지 마세요.
 | `AUTH_RATE_LIMIT_CACHE_MAXIMUM_SIZE` | `10000` | 보관할 IP/인증 경로 버킷의 최대 개수 |
 | `AUTH_RATE_LIMIT_CACHE_EXPIRE_AFTER_ACCESS` | `2h` | 마지막 접근 후 버킷 만료 시간 |
 
-현재는 신뢰할 리버스 프록시가 정의되어 있지 않으므로 `X-Forwarded-For`와 `Forwarded` 헤더를 신뢰하지
-않고 직접 연결의 `remoteAddr`만 사용합니다. 임의의 전달 헤더를 신뢰하면 요청자가 헤더를 바꿔 제한을
-우회할 수 있습니다. 리버스 프록시를 도입할 때는 신뢰할 프록시 주소를 명시적으로 제한한 뒤 IP 해석
-정책을 함께 변경해야 합니다.
+애플리케이션 코드는 `X-Forwarded-For`와 `Forwarded` 헤더를 직접 읽지 않고 `remoteAddr`만 사용합니다.
+임의의 전달 헤더를 신뢰하면 요청자가 헤더를 바꿔 제한을 우회할 수 있기 때문입니다.
+
+운영(prod 프로파일)에서는 Caddy가 앞단에 있으므로 `server.forward-headers-strategy: native`로 Tomcat
+`RemoteIpValve`를 켭니다. 이 밸브는 신뢰 프록시(Tomcat 기본값인 사설 대역)에서 온 요청에 한해서만
+`X-Forwarded-For`로 `remoteAddr`를 실제 클라이언트 IP로 바꿉니다. app의 8080은 호스트에 게시하지 않아
+app에 직접 닿는 곳은 같은 Docker 네트워크의 Caddy뿐이고, Caddy는 외부에서 들어온 `X-Forwarded-For`를
+버리고 실제 접속 IP로 다시 설정합니다. 따라서 요청 제한은 클라이언트 IP별로 적용되며 헤더 위조로 우회할 수
+없습니다. app 포트를 다시 외부에 게시하거나 Caddy 외의 프록시를 앞에 둘 때는 이 신뢰 범위를 다시 검토해야
+합니다. dev·test 프로파일은 프록시가 없으므로 이 설정을 켜지 않습니다.
 
 이 제한 상태는 애플리케이션 인스턴스 메모리에만 존재합니다. 여러 인스턴스를 운영하면 각 인스턴스가
 별도의 허용 횟수를 가지므로 전체 서비스 기준 제한이 아닙니다. 인스턴스 전체에서 공유되는 제한이
@@ -149,9 +155,7 @@ docker exec lms-caddy caddy reload --config /etc/caddy/Caddyfile
 docker compose exec -T app curl -sf http://localhost:8080/v3/api-docs > /dev/null && echo OK
 ```
 
-Caddy 뒤에서는 애플리케이션이 보는 `remoteAddr`가 모두 Caddy 컨테이너 IP입니다. 따라서 위
-"인증 API 요청 제한"은 현재 클라이언트별이 아니라 서비스 전체에 하나의 버킷으로 적용됩니다. 신뢰 프록시 기반
-IP 해석은 별도 작업으로 다룹니다.
+Caddy 뒤에서 실제 클라이언트 IP를 얻는 방식은 위 "인증 API 요청 제한"을 참고하세요.
 
 ## DB 접속
 
