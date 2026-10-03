@@ -132,8 +132,8 @@ HTTPS 인증서는 Caddy가 Let's Encrypt로 자동 발급·갱신하며 `caddy_
 
 | 도메인 | 용도 |
 | --- | --- |
-| `api.satlms.cloud` | API 전용 도메인 |
-| `satlms.cloud`, `www.satlms.cloud` | 프론트(Vercel)로 옮기기 전까지 API를 함께 제공 |
+| `api.satlms.cloud` | API 전용 도메인 (이 서버의 Caddy가 받음) |
+| `satlms.cloud`, `www.satlms.cloud` | 프론트(Vercel). `/api/*`는 Vercel rewrite로 `api.satlms.cloud`에 전달 |
 
 도메인을 추가하거나 바꿀 때는 DNS A 레코드가 서버 IP를 가리키는 것을 먼저 확인한 뒤 레포의 `Caddyfile`을
 수정해 배포하고, 서버에서 설정을 다시 읽게 합니다. CD는 `app`만 재생성하므로 Caddy 설정은 자동으로

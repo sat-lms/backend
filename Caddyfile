@@ -1,5 +1,5 @@
-# api.satlms.cloud가 API 전용 도메인이다. satlms.cloud, www.satlms.cloud는 프론트(Vercel)로
-# 옮기기 전까지 기존 클라이언트를 위해 함께 받는다. 전환이 끝나면 두 도메인을 제거한다(#126).
-satlms.cloud, www.satlms.cloud, api.satlms.cloud {
+# API 전용 도메인. satlms.cloud, www.satlms.cloud는 프론트(Vercel)가 받으며,
+# 프론트의 /api/* 요청은 Vercel rewrite로 이 도메인에 전달된다(#132).
+api.satlms.cloud {
 	reverse_proxy app:8080
 }
