@@ -75,7 +75,8 @@ services:
 
   # HTTPS 종료와 리버스 프록시. 인증서는 Caddy가 Let's Encrypt로 자동 발급·갱신하고
   # caddy_data 볼륨에 보관하므로, 컨테이너를 재생성해도 재발급하지 않는다.
-  # Caddyfile 수정 후에는 `docker exec lms-caddy caddy reload --config /etc/caddy/Caddyfile`로 반영한다.
+  # Caddyfile은 파일이 아니라 caddy/ 폴더 단위로 마운트한다. git pull이 파일을 새로 교체해도
+  # 컨테이너가 새 파일을 보므로 재시작 없이 `caddy reload`로 반영된다(#134). CD가 배포마다 reload한다.
   caddy:
     image: caddy:2-alpine
     container_name: lms-caddy
@@ -84,7 +85,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

@@ -44,3 +44,10 @@ jobs:
               sleep 3
             done
             echo "헬스체크 성공"
+
+            # caddy 서비스 정의(이미지, 마운트 등)가 바뀐 경우에만 컨테이너를 재생성하고,
+            # Caddyfile 변경은 무중단 reload로 반영한다. 문법 오류면 reload가 실패해 배포가
+            # 실패로 표시되고 Caddy는 기존 설정으로 계속 동작한다(#134).
+            docker compose up -d caddy
+            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+            echo "Caddy 설정 반영 완료"
