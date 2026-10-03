@@ -135,17 +135,21 @@ HTTPS 인증서는 Caddy가 Let's Encrypt로 자동 발급·갱신하며 `caddy_
 | `api.satlms.cloud` | API 전용 도메인 (이 서버의 Caddy가 받음) |
 | `satlms.cloud`, `www.satlms.cloud` | 프론트(Vercel). `/api/*`는 Vercel rewrite로 `api.satlms.cloud`에 전달 |
 
-도메인을 추가하거나 바꿀 때는 DNS A 레코드가 서버 IP를 가리키는 것을 먼저 확인한 뒤 레포의 `Caddyfile`을
-수정해 배포하고, 서버에서 설정을 다시 읽게 합니다. CD는 `app`만 재생성하므로 Caddy 설정은 자동으로
-반영되지 않습니다.
+도메인을 추가하거나 바꿀 때는 DNS A 레코드가 서버 IP를 가리키는 것을 먼저 확인한 뒤 레포의
+`caddy/Caddyfile`을 수정해 PR로 머지합니다. CD가 배포마다 Caddy 설정을 무중단 reload하므로 서버에서 따로
+할 일은 없습니다. Caddyfile 문법이 잘못되면 reload가 실패해 배포가 실패로 표시되고, Caddy는 기존 설정으로
+계속 동작합니다. 머지 전에 로컬에서 문법을 확인할 수 있습니다.
+
+```
+docker run --rm -v "$PWD/caddy:/etc/caddy:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+```
+
+`caddy/` 폴더 단위로 마운트하므로 `git pull`이 파일을 새로 교체해도 컨테이너가 새 파일을 봅니다. 서버에서
+수동으로 반영해야 할 때도 재시작 없이 reload하면 됩니다.
 
 ```
 docker exec lms-caddy caddy reload --config /etc/caddy/Caddyfile
 ```
-
-`Caddyfile`은 파일 단위로 마운트되어 있어, 편집기가 저장할 때 파일을 새로 만들면(예: 일부 vim 설정)
-컨테이너가 바뀐 내용을 보지 못합니다. `docker exec lms-caddy cat /etc/caddy/Caddyfile`로 반영 여부를
-확인하고, 예전 내용이 보이면 `docker compose restart caddy`로 재시작하세요(재시작 중 몇 초간 접속이 끊깁니다).
 
 로컬에서 `docker compose up`으로 전체를 띄우면 `app`에 `localhost:8080`으로 접근할 수 없습니다. 로컬 개발은
 `./gradlew bootRun`을 사용하세요. 같은 이유로 서버에서 app 상태를 직접 확인할 때도 호스트가 아니라 컨테이너 안에서
