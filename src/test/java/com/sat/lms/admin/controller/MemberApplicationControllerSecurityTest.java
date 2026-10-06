@@ -7,6 +7,11 @@ import com.sat.lms.global.config.SecurityConfig;
 import com.sat.lms.global.security.JwtAuthenticationFilter;
 import com.sat.lms.global.security.JwtTokenProvider;
 import com.sat.lms.global.exception.BusinessException;
+import com.fasterxml.jackson.core.exc.InputCoercionException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.test.json.JsonCompareMode;
+import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -199,6 +204,31 @@ class MemberApplicationControllerSecurityTest {
         mockMvc.perform(post("/api/v1/admin/member-applications/bulk-approve")
                 .header("Authorization","Bearer admin-token").contentType("application/json").content(body))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
+        verifyNoInteractions(memberReviewService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"9223372036854775808", "99999999999999999999", "-9223372036854775809"})
+    void outOfRangeMemberIdsUseCommon400WithoutExposingInternalExceptions(String id) throws Exception {
+        authenticate("admin-token", 7L, "ADMIN");
+        var result = mockMvc.perform(post("/api/v1/admin/member-applications/bulk-approve")
+                        .header("Authorization", "Bearer admin-token")
+                        .contentType("application/json")
+                        .content("{\"memberIds\":[" + id + "]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.nullValue()))
+                // Exact public envelope also excludes exception names, messages and stack traces.
+                .andExpect(content().json("""
+                        {"success":false,"message":"입력값이 올바르지 않습니다.","data":null}
+                        """, JsonCompareMode.STRICT))
+                .andReturn();
+
+        assertThat(result.getResolvedException())
+                .isInstanceOf(HttpMessageNotReadableException.class)
+                .hasCauseInstanceOf(JsonMappingException.class)
+                .hasRootCauseInstanceOf(InputCoercionException.class);
         verifyNoInteractions(memberReviewService);
     }
 
