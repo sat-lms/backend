@@ -6,6 +6,7 @@ import com.sat.lms.member.entity.MemberReview;
 import com.sat.lms.member.entity.MemberReviewAction;
 import com.sat.lms.member.repository.MemberRepository;
 import com.sat.lms.member.repository.MemberReviewRepository;
+import com.sat.lms.member.service.MemberGuard;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -23,11 +24,11 @@ class MemberReviewServiceTest {
     void savesAuthenticatedAdminMemberIdAsReviewerId() {
         MemberRepository memberRepository = mock(MemberRepository.class);
         MemberReviewRepository memberReviewRepository = mock(MemberReviewRepository.class);
-        MemberReviewService service = new MemberReviewService(memberRepository, memberReviewRepository);
+        MemberReviewService service = new MemberReviewService(memberRepository, memberReviewRepository, mock(MemberGuard.class));
         Member pendingMember = Member.createStudent("2026000001", "학생", "hash");
         MemberReviewRequest request = mock(MemberReviewRequest.class);
         when(request.getAction()).thenReturn(MemberReviewAction.APPROVED);
-        when(memberRepository.findById(10L)).thenReturn(Optional.of(pendingMember));
+        when(memberRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(pendingMember));
 
         service.review(10L, request, 7L);
 
