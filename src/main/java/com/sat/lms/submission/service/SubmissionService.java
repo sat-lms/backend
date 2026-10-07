@@ -248,7 +248,7 @@ public class SubmissionService {
         requireOwnerOrAdmin(requester, link.getSubmission().getStudent());
 
         Attachment attachment = link.getAttachment();
-        DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
+        DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey(), attachment.getOriginalName());
         return new SubmissionAttachmentDownloadUrlResponse(
                 downloadUrl.url(), downloadUrl.expiresInSeconds(), attachment.getOriginalName());
     }

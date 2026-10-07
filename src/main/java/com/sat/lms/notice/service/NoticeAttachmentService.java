@@ -85,7 +85,7 @@ public class NoticeAttachmentService {
         memberGuard.requireMember(memberId);
         NoticeAttachment link = findNoticeAttachment(attachmentId);
         Attachment attachment = link.getAttachment();
-        DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
+        DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey(), attachment.getOriginalName());
         return new NoticeAttachmentDownloadUrlResponse(
                 downloadUrl.url(), downloadUrl.expiresInSeconds(), attachment.getOriginalName());
     }

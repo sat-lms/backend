@@ -10,6 +10,15 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ContentDisposition;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.mock.web.MockMultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -144,7 +153,7 @@ class S3FileStorageTest {
         S3FileStorage configuredStorage = new S3FileStorage(
                 s3Client, presigner, properties("test-private-bucket", expirationMinutes));
 
-        DownloadUrl downloadUrl = configuredStorage.createDownloadUrl("submissions/3/file.docx");
+        DownloadUrl downloadUrl = configuredStorage.createDownloadUrl("submissions/3/file.docx", "과제 안내.docx");
 
         ArgumentCaptor<GetObjectPresignRequest> request = ArgumentCaptor.forClass(GetObjectPresignRequest.class);
         verify(presigner).presignGetObject(request.capture());
@@ -155,6 +164,36 @@ class S3FileStorageTest {
         GetObjectRequest objectRequest = request.getValue().getObjectRequest();
         assertThat(objectRequest.bucket()).isEqualTo("test-private-bucket");
         assertThat(objectRequest.key()).isEqualTo("submissions/3/file.docx");
+        assertThat(ContentDisposition.parse(objectRequest.responseContentDisposition()).isAttachment()).isTrue();
+        assertThat(ContentDisposition.parse(objectRequest.responseContentDisposition()).getFilename()).isEqualTo("과제 안내.docx");
+        assertThat(objectRequest.responseContentDisposition()).contains("filename*=UTF-8''%EA%B3%BC%EC%A0%9C%20");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"report.pdf", "과제 안내.pdf", "(제출서류)AI활용 아이디어 서약서 서식.pdf",
+            "경진대회 개요서 (2).pdf", "과제 최종본.v2.JAVA"})
+    void realSdkPresignIncludesSignedHeaderOverrideWithoutNetworkCalls(String name) {
+        // Explicit fake credentials: SDK signing runs locally and never resolves AWS credentials.
+        try (S3Presigner realPresigner = S3Presigner.builder().region(Region.AP_NORTHEAST_2)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test-key","test-secret")))
+                .build()) {
+            var localStorage = new S3FileStorage(s3Client,realPresigner,properties);
+            DownloadUrl result=localStorage.createDownloadUrl("submissions/5/uuid.pdf",name);
+            Map<String,String> query=Arrays.stream(URI.create(result.url()).getRawQuery().split("&"))
+                    .map(part -> part.split("=",2))
+                    .collect(Collectors.toMap(pair -> URLDecoder.decode(pair[0],StandardCharsets.UTF_8),
+                            pair -> URLDecoder.decode(pair[1],StandardCharsets.UTF_8)));
+            String disposition=query.get("response-content-disposition");
+            // Assert booleans for sensitive URL components so failures do not print signed URLs.
+            assertThat(disposition != null).isTrue();
+            assertThat(ContentDisposition.parse(disposition).isAttachment()).isTrue();
+            assertThat(ContentDisposition.parse(disposition).getFilename()).isEqualTo(name);
+            assertThat(disposition).isEqualTo(DownloadContentDisposition.create(name,"submissions/5/uuid.pdf"));
+            assertThat(query.containsKey("X-Amz-Signature")).isTrue();
+            assertThat(query.get("X-Amz-Expires")).isEqualTo("420");
+            assertThat(result.expiresInSeconds()).isEqualTo(420);
+            org.mockito.Mockito.verifyNoInteractions(s3Client);
+        }
     }
 
     @Test
@@ -162,7 +201,7 @@ class S3FileStorageTest {
         when(presigner.presignGetObject(any(GetObjectPresignRequest.class)))
                 .thenThrow(S3Exception.builder().statusCode(500).message("sensitive internal detail").build());
 
-        assertThatThrownBy(() -> storage.createDownloadUrl("submissions/3/file.docx"))
+        assertThatThrownBy(() -> storage.createDownloadUrl("submissions/3/file.docx", "과제 안내.docx"))
                 .isInstanceOfSatisfying(BusinessException.class, exception -> {
                     assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
                     assertThat(exception.getMessage())

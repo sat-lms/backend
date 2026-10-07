@@ -310,18 +310,22 @@ class SubmissionPostgreSqlIntegrationTest {
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isCreated());
         Long attachmentId = attachmentRepository.findAll().get(0).getId();
-        when(fileStorage.createDownloadUrl(anyString()))
+        var downloadAttachment = attachmentRepository.findById(attachmentId).orElseThrow();
+        when(fileStorage.createDownloadUrl(downloadAttachment.getStorageKey(), downloadAttachment.getOriginalName()))
                 .thenReturn(new DownloadUrl("https://example.com/signed", 300L));
 
         mockMvc.perform(get("/api/v1/submission-attachments/{attachmentId}/download-url", attachmentId)
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.downloadUrl").value("https://example.com/signed"))
+                .andExpect(jsonPath("$.data.expiresIn").value(300))
                 .andExpect(jsonPath("$.data.originalName").value("a.txt"));
 
         mockMvc.perform(get("/api/v1/submission-attachments/{attachmentId}/download-url", attachmentId)
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk());
+        org.mockito.Mockito.verify(fileStorage, org.mockito.Mockito.times(2))
+                .createDownloadUrl(downloadAttachment.getStorageKey(), "a.txt");
     }
 
     @Test

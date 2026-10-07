@@ -564,7 +564,7 @@ class NoticePostgreSqlIntegrationTest {
                 Long.class, noticeId)).isEqualTo(2L);
 
         Long attachmentId = ((Number) rows.get(0).get("id")).longValue();
-        when(fileStorage.createDownloadUrl("notices/" + noticeId + "/" + firstStored))
+        when(fileStorage.createDownloadUrl("notices/" + noticeId + "/" + firstStored, "안내.PDF"))
                 .thenReturn(new DownloadUrl("https://example.test/signed", 300L));
         mockMvc.perform(get("/api/v1/notice-attachments/{attachmentId}/download-url", attachmentId)
                         .header("Authorization", "Bearer "
@@ -613,7 +613,7 @@ class NoticePostgreSqlIntegrationTest {
         mockMvc.perform(get("/api/v1/notice-attachments/{id}/download-url", otherAttachmentId)
                         .header("Authorization", "Bearer " + studentToken))
                 .andExpect(status().isNotFound());
-        verify(fileStorage, never()).createDownloadUrl(anyString());
+        verify(fileStorage, never()).createDownloadUrl(anyString(), anyString());
 
         mockMvc.perform(delete("/api/v1/notice-attachments/{id}", noticeAttachmentId)
                         .header("Authorization", "Bearer "

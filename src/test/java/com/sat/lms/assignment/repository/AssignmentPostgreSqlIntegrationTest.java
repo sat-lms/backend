@@ -483,7 +483,7 @@ class AssignmentPostgreSqlIntegrationTest {
         mockMvc.perform(get("/api/v1/assignment-attachments/{id}/download-url", submissionAttachmentId)
                         .header("Authorization", "Bearer " + token(studentId, "STUDENT")))
                 .andExpect(status().isNotFound());
-        verify(fileStorage, never()).createDownloadUrl(anyString());
+        verify(fileStorage, never()).createDownloadUrl(anyString(), anyString());
 
         mockMvc.perform(delete("/api/v1/assignment-attachments/{id}", attachmentId)
                         .header("Authorization", "Bearer " + token(adminId, "ADMIN")))
