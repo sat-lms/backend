@@ -34,6 +34,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.ContentDisposition;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -321,6 +322,9 @@ class AttachmentDomainS3PostgreSqlIntegrationTest {
                 HttpRequest.newBuilder(URI.create(url)).GET().build(), HttpResponse.BodyHandlers.ofByteArray());
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.body()).isEqualTo(expected);
+        String disposition = response.headers().firstValue("Content-Disposition").orElseThrow();
+        assertThat(ContentDisposition.parse(disposition).isAttachment()).isTrue();
+        assertThat(ContentDisposition.parse(disposition).getFilename()).isEqualTo(data.get("originalName").textValue());
     }
 
     private void assertBucketIsPrivate() throws Exception {
@@ -486,8 +490,8 @@ class AttachmentDomainS3PostgreSqlIntegrationTest {
         }
 
         @Override
-        public DownloadUrl createDownloadUrl(String storageKey) {
-            return delegate.createDownloadUrl(storageKey);
+        public DownloadUrl createDownloadUrl(String storageKey, String originalName) {
+            return delegate.createDownloadUrl(storageKey, originalName);
         }
 
         Set<String> trackedKeys() {

@@ -203,13 +203,14 @@ class AssignmentAttachmentServiceTest {
         when(link.getAttachment()).thenReturn(attachment);
         when(assignmentAttachmentRepository.findWithAssignmentAndAttachmentByAttachmentId(1L))
                 .thenReturn(Optional.of(link));
-        when(fileStorage.createDownloadUrl("assignments/10/a.pdf"))
+        when(fileStorage.createDownloadUrl("assignments/10/a.pdf", "원본.pdf"))
                 .thenReturn(new DownloadUrl("https://signed.test", 347L));
 
         var response = service.getDownloadUrl(1L, 8L);
         assertThat(response.getDownloadUrl()).isEqualTo("https://signed.test");
         assertThat(response.getExpiresIn()).isEqualTo(347L);
         assertThat(response.getOriginalName()).isEqualTo("원본.pdf");
+        verify(fileStorage).createDownloadUrl("assignments/10/a.pdf", "원본.pdf");
         stubMember(7L, MemberRole.ADMIN);
         assertThat(service.getDownloadUrl(1L, 7L).getDownloadUrl()).isEqualTo("https://signed.test");
 
@@ -217,7 +218,7 @@ class AssignmentAttachmentServiceTest {
         when(assignmentAttachmentRepository.findWithAssignmentAndAttachmentByAttachmentId(99L))
                 .thenReturn(Optional.empty());
         assertStatus(() -> service.getDownloadUrl(99L, 8L), HttpStatus.NOT_FOUND);
-        verify(fileStorage, never()).createDownloadUrl(anyString());
+        verify(fileStorage, never()).createDownloadUrl(anyString(), anyString());
     }
 
     @Test

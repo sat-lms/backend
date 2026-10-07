@@ -269,7 +269,7 @@ class MemberGuardPostgreSqlIntegrationTest {
         Long assignmentAttachmentId = insertAssignmentAttachment(assignmentId, "assignments/existing.pdf");
         String adminToken = jwtTokenProvider.createAccessToken(adminId, "ADMIN");
         String studentToken = jwtTokenProvider.createAccessToken(studentId, "STUDENT");
-        when(fileStorage.createDownloadUrl(anyString())).thenReturn(new DownloadUrl("https://example.test", 300));
+        when(fileStorage.createDownloadUrl(anyString(), anyString())).thenReturn(new DownloadUrl("https://example.test", 300));
         when(fileStorage.upload(any(), eq("notices/" + noticeId)))
                 .thenReturn(new StoredFile("new.pdf", "notice-new.pdf", "notices/new.pdf", "pdf", 1L));
         when(fileStorage.upload(any(), eq("assignments/" + assignmentId)))

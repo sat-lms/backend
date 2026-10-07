@@ -5,5 +5,5 @@ import org.springframework.web.multipart.MultipartFile;
 public interface FileStorage {
     StoredFile upload(MultipartFile file, String directory);
     void delete(String storageKey);
-    DownloadUrl createDownloadUrl(String storageKey);
+    DownloadUrl createDownloadUrl(String storageKey, String originalName);
 }

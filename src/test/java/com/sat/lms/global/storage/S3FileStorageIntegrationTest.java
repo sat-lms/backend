@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.http.ContentDisposition;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -49,13 +50,17 @@ class S3FileStorageIntegrationTest {
             S3FileStorage storage = new S3FileStorage(client, presigner, properties);
             try {
                 stored = storage.upload(new MockMultipartFile(
-                        "file", "test.txt", "text/plain", content), directory);
-                DownloadUrl downloadUrl = storage.createDownloadUrl(stored.storageKey());
+                        "file", "과제 안내 (최종).txt", "text/plain", content), directory);
+                DownloadUrl downloadUrl = storage.createDownloadUrl(stored.storageKey(), stored.originalName());
                 HttpResponse<byte[]> response = HttpClient.newHttpClient().send(
                         HttpRequest.newBuilder(URI.create(downloadUrl.url())).GET().build(),
                         HttpResponse.BodyHandlers.ofByteArray());
                 assertThat(response.statusCode()).isEqualTo(200);
                 assertThat(response.body()).isEqualTo(content);
+                String disposition = response.headers().firstValue("Content-Disposition").orElseThrow();
+                assertThat(ContentDisposition.parse(disposition).isAttachment()).isTrue();
+                assertThat(ContentDisposition.parse(disposition).getFilename()).isEqualTo(stored.originalName());
+                assertThat(disposition).contains("filename*=UTF-8''", "%20");
 
                 storage.delete(stored.storageKey());
                 String deletedKey = stored.storageKey();

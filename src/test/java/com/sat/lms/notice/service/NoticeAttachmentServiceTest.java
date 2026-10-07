@@ -274,7 +274,7 @@ class NoticeAttachmentServiceTest {
         NoticeAttachment link = NoticeAttachment.create(mock(Notice.class), attachment);
         when(noticeAttachmentRepository.findWithNoticeAndAttachmentByAttachmentId(1L))
                 .thenReturn(Optional.of(link));
-        when(fileStorage.createDownloadUrl("notices/10/a.pdf"))
+        when(fileStorage.createDownloadUrl("notices/10/a.pdf", "원본.pdf"))
                 .thenReturn(new DownloadUrl("https://example.test/signed", 347L));
 
         var response = service.getDownloadUrl(1L, 8L);
@@ -282,6 +282,7 @@ class NoticeAttachmentServiceTest {
         assertThat(response.getOriginalName()).isEqualTo("원본.pdf");
         assertThat(response.getDownloadUrl()).isEqualTo("https://example.test/signed");
         assertThat(response.getExpiresIn()).isEqualTo(347L);
+        verify(fileStorage).createDownloadUrl("notices/10/a.pdf", "원본.pdf");
     }
 
     @Test
@@ -290,7 +291,7 @@ class NoticeAttachmentServiceTest {
         when(noticeAttachmentRepository.findWithNoticeAndAttachmentByAttachmentId(99L)).thenReturn(Optional.empty());
 
         assertStatus(() -> service.getDownloadUrl(99L, 8L), HttpStatus.NOT_FOUND);
-        verify(fileStorage, never()).createDownloadUrl(anyString());
+        verify(fileStorage, never()).createDownloadUrl(anyString(), anyString());
     }
 
     @Test

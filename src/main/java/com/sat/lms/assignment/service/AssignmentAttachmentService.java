@@ -79,7 +79,7 @@ public class AssignmentAttachmentService {
         memberGuard.requireMember(memberId);
         AssignmentAttachment link = findAssignmentAttachment(attachmentId);
         Attachment attachment = link.getAttachment();
-        DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey());
+        DownloadUrl downloadUrl = fileStorage.createDownloadUrl(attachment.getStorageKey(), attachment.getOriginalName());
         return new AssignmentAttachmentDownloadUrlResponse(
                 downloadUrl.url(), downloadUrl.expiresInSeconds(), attachment.getOriginalName());
     }

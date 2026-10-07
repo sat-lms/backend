@@ -23,6 +23,8 @@ import com.sat.lms.submission.entity.Submission;
 import com.sat.lms.submission.repository.SubmissionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -699,25 +701,28 @@ class SubmissionServiceTest {
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
     }
 
-    @Test
-    void getDownloadUrlSucceedsForOwner() {
+    @ParameterizedTest
+    @ValueSource(strings = {"submissions/5/a.txt", "submissions/5/ff85531f-3b4a-4d3a-a017-6319616425c4.txt",
+            "submissions/2ba88e89-b69b-4b18-9cb0-129c6ad25061/ff85531f-3b4a-4d3a-a017-6319616425c4.txt"})
+    void getDownloadUrlSucceedsForOwner(String storageKey) {
         Member student = student(3L);
         Assignment assignment = assignment(false, OffsetDateTime.now().plusDays(1));
         Submission submission = existingSubmission(5L, student, assignment, "text", false);
-        Attachment targetAttachment = attachment("a.txt", "submissions/5/a.txt");
+        Attachment targetAttachment = attachment("과제 안내.txt", storageKey);
         SubmissionAttachment link = SubmissionAttachment.create(submission, targetAttachment);
         stubApprovedMember(3L, student);
         givenLockedSubmission(assignment, submission);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
-        when(fileStorage.createDownloadUrl("submissions/5/a.txt"))
+        when(fileStorage.createDownloadUrl(storageKey, "과제 안내.txt"))
                 .thenReturn(new DownloadUrl("https://example.com/signed", 347L));
 
         var response = service.getDownloadUrl(10L, 3L);
 
         assertThat(response.getDownloadUrl()).isEqualTo("https://example.com/signed");
         assertThat(response.getExpiresIn()).isEqualTo(347L);
-        assertThat(response.getOriginalName()).isEqualTo("a.txt");
+        assertThat(response.getOriginalName()).isEqualTo("과제 안내.txt");
+        verify(fileStorage).createDownloadUrl(storageKey, "과제 안내.txt");
     }
 
     @Test
@@ -733,7 +738,7 @@ class SubmissionServiceTest {
         stubApprovedMember(7L, admin);
         when(submissionAttachmentRepository.findWithSubmissionAndAttachmentByAttachmentId(10L))
                 .thenReturn(Optional.of(link));
-        when(fileStorage.createDownloadUrl("submissions/5/a.txt"))
+        when(fileStorage.createDownloadUrl("submissions/5/a.txt", "a.txt"))
                 .thenReturn(new DownloadUrl("https://example.com/signed", 347L));
 
         var response = service.getDownloadUrl(10L, 7L);
@@ -756,7 +761,7 @@ class SubmissionServiceTest {
         assertThatThrownBy(() -> service.getDownloadUrl(10L, 8L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
-        verify(fileStorage, never()).createDownloadUrl(anyString());
+        verify(fileStorage, never()).createDownloadUrl(anyString(), anyString());
     }
 
     @Test
@@ -769,7 +774,15 @@ class SubmissionServiceTest {
         assertThatThrownBy(() -> service.getDownloadUrl(99L, 3L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));
-        verify(fileStorage, never()).createDownloadUrl(anyString());
+        verify(fileStorage, never()).createDownloadUrl(anyString(), anyString());
+    }
+
+    @Test
+    void inactiveMemberCannotReachAttachmentLookupOrDownloadSigning() {
+        var forbidden = new BusinessException(HttpStatus.FORBIDDEN, "탈퇴하거나 정지된 계정입니다.");
+        when(memberGuard.requireMember(3L)).thenThrow(forbidden);
+        assertThatThrownBy(() -> service.getDownloadUrl(10L, 3L)).isSameAs(forbidden);
+        org.mockito.Mockito.verifyNoInteractions(submissionAttachmentRepository, fileStorage);
     }
 
     @Test
